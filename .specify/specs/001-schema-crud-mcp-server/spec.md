@@ -517,6 +517,9 @@ All mutating operations (update, create, delete) follow this mandatory workflow 
 - **FR-065b**: MCP server MUST run on stdio transport for agent integration
 - **FR-065c**: REST API MUST run on HTTP with configurable port (default 8080)
 - **FR-065d**: System MUST support running both interfaces simultaneously OR independently based on configuration
+- **FR-065e**: **ZERO DUPLICATION PRINCIPLE**: Both interfaces MUST share 100% of business logic through a common service layer. MCP tools and REST endpoints MUST be thin protocol adapters only, containing NO business logic, validation, storage, or domain logic. ALL such logic MUST reside in shared service classes.
+- **FR-065f**: Interface layer (MCP tools + REST routes) MUST only perform: (1) protocol-specific request parsing, (2) calling shared service methods, (3) protocol-specific response formatting. Any business logic found in interface layer is a defect.
+- **FR-065g**: Both interfaces MUST use identical service method signatures, ensuring consistent behavior and preventing logic drift between protocols.
 
 #### MCP Protocol Integration
 
@@ -689,6 +692,7 @@ These features are deferred to future iterations after MVP validation. They repr
 - Must validate all data against schemas at every boundary
 - Must follow TDD approach (tests written and approved before implementation)
 - Must provide BOTH MCP and REST interfaces with identical functionality
+- **ARCHITECTURAL CONSTRAINT - ZERO DUPLICATION**: Business logic, validation, storage, and domain operations MUST exist in shared service layer only. Interface layers (MCP tools, REST routes) MUST be thin adapters containing ONLY protocol-specific parsing and formatting. Any duplication of business logic between interfaces violates this constraint.
 - Must handle documents as complete units (no partial document loading except via path operations)
 - Must support schemas up to reasonable complexity (depth limits, reference limits to prevent DoS)
 - Performance target: sub-second response for documents up to 10MB

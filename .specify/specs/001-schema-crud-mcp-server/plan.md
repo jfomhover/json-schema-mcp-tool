@@ -22,10 +22,50 @@ This plan outlines the implementation of a Python-based MCP server that provides
 - Structured logging with Python logging module
 
 **Architecture Pattern**: Layered architecture with clear separation of concerns:
-1. **Interface Layer**: MCP tools + REST endpoints (dual entry points)
-2. **Service Layer**: Business logic (document operations, validation) - shared by both interfaces
-3. **Storage Layer**: File system abstraction
-4. **Domain Layer**: Core entities and value objects
+1. **Interface Layer**: MCP tools + REST endpoints (dual entry points - THIN ADAPTERS ONLY, NO BUSINESS LOGIC)
+2. **Service Layer**: Business logic (document operations, validation) - **100% SHARED by both interfaces - SINGLE SOURCE OF TRUTH**
+3. **Storage Layer**: File system abstraction - shared by both interfaces
+4. **Domain Layer**: Core entities and value objects - shared by both interfaces
+
+**CRITICAL ARCHITECTURAL PRINCIPLE - NO CODE DUPLICATION:**
+- MCP tools (`mcp_tools/`) and REST endpoints (`rest_api/routes/`) are **thin interface adapters only**
+- ALL business logic resides in the **shared service layer** (`services/`)
+- Both interfaces call the SAME service methods (e.g., `document_service.create_document()`)
+- Both interfaces use the SAME domain models and exceptions
+- Both interfaces use the SAME storage layer
+- The ONLY difference between interfaces: request/response formatting and protocol-specific concerns
+- **Rule**: If you find yourself copying logic between MCP tools and REST routes, STOP and move it to the service layer
+
+**Data Flow (Identical for Both Interfaces):**
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Interface Layer (Protocol Adapters - NO BUSINESS LOGIC)   │
+│  ┌──────────────────┐      ┌──────────────────────────┐    │
+│  │  MCP Tools       │      │  REST API Routes         │    │
+│  │  - Parse MCP     │      │  - Parse HTTP requests   │    │
+│  │    requests      │      │  - Format HTTP responses │    │
+│  │  - Format MCP    │      │  - Map HTTP status codes │    │
+│  │    responses     │      │                          │    │
+│  └────────┬─────────┘      └────────┬─────────────────┘    │
+│           │                         │                       │
+│           └─────────┬───────────────┘                       │
+└─────────────────────┼───────────────────────────────────────┘
+                      │ Both call same methods
+                      ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Service Layer (100% SHARED - SINGLE SOURCE OF TRUTH)      │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  DocumentService, ValidationService, SchemaService,  │  │
+│  │  LockService - ALL business logic here              │  │
+│  └────────┬─────────────────────────────────────────────┘  │
+│           │                                                 │
+└───────────┼─────────────────────────────────────────────────┘
+            ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Storage Layer (SHARED)                                     │
+│  FileSystemStorage, Metadata handling                       │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -123,6 +163,109 @@ json-schema-mcp-tool/
 ├── requirements-dev.txt                # Development dependencies
 └── config.example.json                 # Example configuration file
 ```
+
+---
+
+## Interface-to-Service Mapping (Zero Duplication)
+
+**This table proves NO business logic duplication between MCP and REST:**
+
+| Operation | MCP Tool | MCP Parameters (from spec) | REST Endpoint | REST Parameters | Shared Service Method | Service Returns | Notes |
+|-----------|----------|----------------------------|---------------|-----------------|----------------------|-----------------|-------|
+| Create document | `document_create()` | NONE | `POST /documents` | NONE (no body) | `DocumentService.create_document()` | `(doc_id: DocumentId, version: int, initial_content: dict)` | Auto-generates doc_id, initializes with schema defaults |
+| Read node | `document_read_node()` | `doc_id, node_path` | `GET /documents/{doc_id}?node_path=...` | path param, query param | `DocumentService.read_node(doc_id, node_path)` | `(node_content: Any, version: int)` | Returns content at path + current version |
+| Get schema node | `schema_get_node()` | `doc_id, node_path, dereferenced` | `GET /schema/node?node_path=...&dereferenced=...` | query params | `SchemaService.get_node_schema(doc_id, node_path, dereferenced)` | `dict` (schema definition) | Schema introspection for specific path |
+| Update node | `document_update_node()` | `doc_id, node_path, node_data, version` | `PUT /documents/{doc_id}?node_path=...&version=...` | path param, query params, body | `DocumentService.update_node(doc_id, node_path, node_data, version)` | `int` (new version) | Updates node, validates, increments version |
+| Create node | `document_create_node()` | `doc_id, node_path, node_data, version` | `POST /documents/{doc_id}/nodes?node_path=...&version=...` | path param, query params, body | `DocumentService.create_node(doc_id, node_path, node_data, version)` | `(created_node_path: str, new_version: int)` | Creates new node, validates, increments version |
+| Delete node | `document_delete_node()` | `doc_id, node_path, version` | `DELETE /documents/{doc_id}/nodes?node_path=...&version=...` | path param, query params | `DocumentService.delete_node(doc_id, node_path, version)` | `(deleted_node: Any, new_version: int)` | Deletes node, validates, increments version |
+| List documents | `document_list()` | `limit, offset` | `GET /documents?limit=...&offset=...` | query params | `DocumentService.list_documents(limit, offset)` | `list[dict]` (doc metadata) | Paginated document list |
+| Get root schema | `schema_get_root()` | `dereferenced` | `GET /schema?dereferenced=...` | query param | `SchemaService.get_root_schema(dereferenced)` | `(root_schema: dict, schema_uri: str)` | Returns full schema definition |
+
+**What's DIFFERENT (and that's ALL that's different):**
+- **MCP tools**: Parse MCP JSON-RPC requests → Call service → Format as MCP TextContent response
+- **REST routes**: Parse HTTP requests (path/query params/body) → Call service → Format as JSON + HTTP status code
+
+**What's IDENTICAL (100% shared):**
+- All validation logic (`ValidationService`)
+- All document operations (`DocumentService`)
+- All schema operations (`SchemaService`)
+- All locking logic (`LockService`)
+- All storage operations (`FileSystemStorage`)
+- All domain models and exceptions
+- All business rules and constraints
+
+**Code Example Showing Zero Duplication:**
+
+```python
+# ❌ WRONG - Duplicated business logic
+# mcp_tools/document_tools.py
+async def document_create():
+    # Validate defaults against schema
+    # Generate ULID
+    # Save to storage
+    # This is BAD - business logic in interface layer!
+
+# rest_api/routes/documents.py  
+async def create_document():
+    # DUPLICATE ULID generation here
+    # DUPLICATE validation logic here
+    # DUPLICATE storage logic here
+    # This is BAD - duplicated code!
+
+# ✅ CORRECT - Shared service method
+# services/document_service.py
+class DocumentService:
+    async def create_document(self) -> tuple[DocumentId, int]:
+        """
+        ALL business logic here - used by BOTH interfaces.
+        Auto-generates doc_id, validates defaults, persists document.
+        """
+        # ULID generation (only written once)
+        doc_id = ULIDGenerator.generate()
+        
+        # Validation logic (only written once)
+        defaults = self.schema_service.get_defaults()
+        validation_result = self.validation_service.validate(defaults)
+        if not validation_result.valid:
+            raise ValidationFailedError(...)
+        
+        # Storage logic (only written once)
+        document = Document(doc_id, defaults)
+        await self.storage.save(document, metadata)
+        
+        # Return result (both interfaces format differently)
+        return doc_id, 1
+
+# mcp_tools/document_tools.py (THIN ADAPTER)
+async def document_create(arguments: dict) -> list[TextContent]:
+    """MCP tool - just call service and format MCP response (NO args needed)"""
+    
+    # Call shared service (ALL logic here)
+    doc_id, version = await document_service.create_document()
+    
+    # Format as MCP response
+    return [TextContent(type="text", text=json.dumps({
+        "doc_id": str(doc_id),
+        "version": version
+    }))]
+
+# rest_api/routes/documents.py (THIN ADAPTER)
+@router.post("/documents", status_code=201)
+async def create_document(document_service: DocumentService = Depends(get_document_service)):
+    """REST endpoint - just call SAME service and format HTTP response (NO request body needed)"""
+    
+    # Call SAME shared service (ALL logic here)
+    doc_id, version = await document_service.create_document()
+    
+    # Format as HTTP response
+    return DocumentCreateResponse(document_id=str(doc_id), version=version)
+```
+
+**Enforcement Strategy:**
+1. Code reviews MUST check: Is business logic in service layer?
+2. If logic appears in both `mcp_tools/` and `rest_api/`, it's a bug
+3. Unit tests target service layer (tested once, used by both interfaces)
+4. Integration tests verify both interfaces call same service methods
 
 ---
 
@@ -1042,6 +1185,8 @@ class ULIDGenerator:
 
 **Goal**: Load JSON Schema with $ref resolution.
 
+**CRITICAL**: These services are **SHARED BY BOTH INTERFACES**. Both MCP tools and REST routes use the same SchemaService and ValidationService instances with zero duplication.
+
 **Implementation:**
 ```python
 # src/json_schema_mcp/services/schema_service.py
@@ -1051,7 +1196,15 @@ import json
 from pathlib import Path
 
 class SchemaService:
-    """JSON Schema loading and introspection (FR-086 to FR-090)"""
+    """
+    JSON Schema loading and introspection (FR-086 to FR-090).
+    
+    **SHARED BY BOTH INTERFACES**: Called identically by:
+    - schema_get_root MCP tool
+    - schema_get_node MCP tool
+    - GET /schema REST endpoint
+    - GET /schema/node REST endpoint
+    """
     
     def __init__(self, schema_path: Path):
         self.schema_path = schema_path
@@ -1252,6 +1405,8 @@ class ValidationService:
 
 **Goal**: Implement copy-on-write document operations.
 
+**CRITICAL**: This is the **SHARED CORE** used by BOTH MCP and REST interfaces. All business logic, validation, concurrency control, and storage operations live here. MCP tools and REST routes will call these methods directly with zero duplication.
+
 **Implementation:**
 ```python
 # src/json_schema_mcp/services/document_service.py
@@ -1265,7 +1420,16 @@ from .schema_service import SchemaService
 from ..storage.storage_interface import StorageAdapter
 
 class DocumentService:
-    """Document CRUD operations with copy-on-write semantics"""
+    """
+    Document CRUD operations with copy-on-write semantics.
+    
+    **SHARED BY BOTH INTERFACES**: This service is called identically by:
+    - MCP tools in mcp_tools/document_tools.py
+    - REST routes in rest_api/routes/documents.py
+    
+    ALL business logic, validation, locking, and storage operations MUST be here.
+    Interface layers ONLY parse requests and format responses.
+    """
     
     def __init__(
         self,
@@ -1321,16 +1485,16 @@ class DocumentService:
         
         return doc_id, 1
     
-    async def read_node(self, doc_id: DocumentId, path: str) -> tuple[Any, int]:
+    async def read_node(self, doc_id: DocumentId, node_path: str) -> tuple[Any, int]:
         """
-        Read content at path (FR-026 to FR-031).
+        Read content at node_path (FR-026 to FR-031).
         Returns (content, version) for optimistic locking (FR-077).
         """
         # Load document
         document, metadata = await self.storage.load(doc_id)
         
-        # Resolve path
-        json_pointer = JSONPointer(path)
+        # Resolve node_path
+        json_pointer = JSONPointer(node_path)
         content = json_pointer.resolve(document.content)
         
         return content, metadata.version
@@ -1338,8 +1502,8 @@ class DocumentService:
     async def update_node(
         self,
         doc_id: DocumentId,
-        path: str,
-        value: Any,
+        node_path: str,
+        node_data: Any,
         expected_version: int
     ) -> tuple[Any, int]:
         """
@@ -1364,8 +1528,8 @@ class DocumentService:
             cloned_content = copy.deepcopy(document.content)
             
             # MODIFY: Apply change to clone (FR-041b)
-            json_pointer = JSONPointer(path)
-            modified_content = json_pointer.set_value(cloned_content, value)
+            json_pointer = JSONPointer(node_path)
+            modified_content = json_pointer.set_value(cloned_content, node_data)
             
             # VALIDATE: Validate entire cloned document (FR-041c)
             validation_report = self.validation_service.validate(modified_content)
@@ -1502,6 +1666,8 @@ class LockService:
 
 **Goal**: Implement all 8 MCP tools with JSON Schema definitions.
 
+**CRITICAL**: MCP tools are **THIN WRAPPERS ONLY**. They parse MCP requests, call shared service methods, and format MCP responses. **ZERO business logic** in this layer - all validation, storage, and domain logic is in the service layer.
+
 **Implementation:**
 ```python
 # src/json_schema_mcp/mcp_tools/document_tools.py
@@ -1510,15 +1676,27 @@ from mcp.types import Tool, TextContent
 from ..services.document_service import DocumentService
 
 def register_document_tools(server: Server, document_service: DocumentService):
-    """Register document CRUD tools with MCP server"""
+    """
+    Register document CRUD tools with MCP server.
+    
+    **ARCHITECTURAL NOTE**: These are THIN ADAPTERS only.
+    - Parse MCP request format (arguments dict)
+    - Call shared DocumentService methods (ALL business logic there)
+    - Format response as MCP TextContent
+    - NO validation, storage, or domain logic here
+    """
     
     @server.call_tool()
     async def document_create(arguments: dict) -> list[TextContent]:
         """
         Creates a new empty document conforming to the server's configured schema.
         Returns unique doc_id and initial version.
+        
+        **THIN WRAPPER**: Calls document_service.create_document() - ALL logic there.
+        This function ONLY: parses MCP arguments, calls service, formats MCP response.
         """
         try:
+            # Call shared service method (ALL business logic here)
             doc_id, version = await document_service.create_document()
             
             result = {
@@ -1552,13 +1730,18 @@ def register_document_tools(server: Server, document_service: DocumentService):
     
     @server.call_tool()
     async def document_read_node(arguments: dict) -> list[TextContent]:
-        """Retrieves content at a specified node (path) within the document tree."""
+        """
+        Retrieves content at a specified node (path) within the document tree.
+        
+        **THIN WRAPPER**: Calls document_service.read_node() - ALL logic there.
+        """
         doc_id = arguments["doc_id"]
-        path = arguments["node_path"]
+        node_path = arguments["node_path"]
         
         try:
+            # Call shared service method (ALL business logic here)
             content, version = await document_service.read_node(
-                DocumentId(doc_id), path
+                DocumentId(doc_id), node_path
             )
             
             result = {
@@ -1601,23 +1784,26 @@ def register_document_tools(server: Server, document_service: DocumentService):
 ```
 
 **Tasks:**
-- [ ] Implement all 8 MCP tools with proper signatures
+- [ ] Implement all 8 MCP tools as thin wrappers (parse MCP args → call service → format MCP response)
 - [ ] Define JSON Schema for tool inputs (FR-065, FR-068)
 - [ ] Define JSON Schema for tool outputs (FR-069)
-- [ ] Map domain exceptions to MCP error responses (FR-067)
-- [ ] Add comprehensive error handling
-- [ ] Include validation reports in responses
+- [ ] Map domain exceptions to MCP error responses (FR-067) - format only, NO business logic
+- [ ] Add error handling wrappers (catch service exceptions, format as MCP errors)
+- [ ] Include validation reports in MCP responses (from service layer)
+- [ ] Verify NO business logic in tool implementations (all in DocumentService/SchemaService)
 
 **Test Cases:**
-- Each tool with valid inputs
-- Each tool with invalid inputs
+- Each tool with valid inputs calls correct service method
+- Each tool with invalid inputs returns service errors formatted as MCP responses
 - Error responses match specification
 - JSON Schema validation for inputs/outputs
+- **Interface parity test**: Verify MCP tools call SAME service methods as REST routes
 
 **Deliverables:**
-- ✅ 8 MCP tools fully implemented
+- ✅ 8 MCP tools fully implemented as thin wrappers
 - ✅ Complete JSON Schema definitions
-- ✅ Structured error responses
+- ✅ Structured error responses (formatting only, errors from service layer)
+- ✅ Zero business logic in MCP tools (all in shared services)
 
 ---
 
@@ -1842,6 +2028,8 @@ if __name__ == "__main__":
 
 **Context**: The server must provide BOTH MCP (for agent integration) and REST API (for traditional HTTP clients) interfaces. Both interfaces share the same business logic layer and provide identical functionality (FR-065, FR-070).
 
+**CRITICAL**: REST routes are **THIN WRAPPERS ONLY**. They parse HTTP requests, call the SAME shared service methods as MCP tools, and format HTTP responses. **ZERO business logic duplication** - all validation, storage, and domain logic is in the service layer shared with MCP.
+
 **Implementation:**
 
 ```python
@@ -1919,10 +2107,7 @@ async def run_rest_server(port: int = 8080):
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List
 
-class DocumentCreateRequest(BaseModel):
-    """Request body for POST /documents (FR-070a)"""
-    document_id: str = Field(..., description="ULID identifier for new document")
-    content: dict[str, Any] = Field(..., description="Initial JSON content")
+# Note: DocumentCreateRequest is NOT needed - POST /documents takes NO body (auto-generates doc_id)
 
 class DocumentCreateResponse(BaseModel):
     """Response for successful document creation"""
@@ -1933,18 +2118,19 @@ class DocumentCreateResponse(BaseModel):
 class NodeReadResponse(BaseModel):
     """Response for GET /documents/{doc_id} (FR-070b)"""
     document_id: str
-    path: str
-    content: Any
+    node_path: str
+    node_content: Any
     version: int
 
 class NodeUpdateRequest(BaseModel):
     """Request body for PUT/POST/DELETE on nodes (FR-070c, FR-070d, FR-070e)"""
-    value: Optional[Any] = Field(None, description="New value for the node")
+    node_data: Any = Field(..., description="New data for the node")
+    version: int = Field(..., description="Expected document version for optimistic locking")
 
 class NodeUpdateResponse(BaseModel):
     """Response for successful node operations"""
     document_id: str
-    path: str
+    node_path: str
     version: int
     message: str
 
@@ -1956,11 +2142,11 @@ class DocumentListResponse(BaseModel):
 class SchemaResponse(BaseModel):
     """Response for GET /schema (FR-070g)"""
     schema_uri: str
-    schema: dict[str, Any]
+    root_schema: dict[str, Any]
 
 class SchemaNodeResponse(BaseModel):
     """Response for GET /schema/node (FR-070h)"""
-    path: str
+    node_path: str
     node_schema: dict[str, Any]
 
 class ErrorResponse(BaseModel):
@@ -1984,20 +2170,29 @@ def get_document_service(request: Request):
     """Dependency: Get DocumentService from app state"""
     return request.app.state.document_service
 
+def get_schema_service(request: Request):
+    """Dependency: Get SchemaService from app state"""
+    return request.app.state.schema_service
+
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=DocumentCreateResponse)
 async def create_document(
-    req: DocumentCreateRequest,
-    service = Depends(get_document_service)
+    document_service: DocumentService = Depends(get_document_service)
 ) -> DocumentCreateResponse:
     """
-    Create a new schema-validated document (FR-070a).
+    Create a new schema-validated document with auto-generated doc_id (FR-070a).
     Maps to document_create MCP tool.
+    
+    **THIN WRAPPER**: Calls document_service.create_document() - SAME method as MCP tool.
+    This function ONLY: calls shared service, formats HTTP response.
+    NO business logic here - ALL validation/storage in DocumentService.
+    NO request body - doc_id is auto-generated.
     """
     try:
-        result = await service.create_document(req.document_id, req.content)
+        # Call SAME shared service method used by MCP tool (NO parameters)
+        doc_id, version = await document_service.create_document()
         return DocumentCreateResponse(
-            document_id=req.document_id,
-            version=result["version"],
+            document_id=str(doc_id),
+            version=version,
             message="Document created successfully"
         )
     except ValidationFailedError as e:
@@ -2014,19 +2209,22 @@ async def create_document(
 @router.get("/{doc_id}", response_model=NodeReadResponse)
 async def read_node(
     doc_id: str,
-    path: str = Query("/", description="JSON Pointer path"),
-    service = Depends(get_document_service)
+    node_path: str = Query("/", description="JSON Pointer path"),
+    document_service: DocumentService = Depends(get_document_service)
 ) -> NodeReadResponse:
     """
     Read a document or node at a specific JSON Pointer path (FR-070b).
     Maps to document_read_node MCP tool.
+    
+    **THIN WRAPPER**: Calls document_service.read_node() - SAME method as MCP tool.
     """
     try:
-        content, version = await service.read_node(doc_id, path)
+        # Call SAME shared service method used by MCP tool
+        content, version = await document_service.read_node(doc_id, node_path)
         return NodeReadResponse(
             document_id=doc_id,
-            path=path,
-            content=content,
+            node_path=node_path,
+            node_content=content,
             version=version
         )
     except DocumentNotFoundError as e:
@@ -2043,20 +2241,23 @@ async def read_node(
 @router.put("/{doc_id}", response_model=NodeUpdateResponse)
 async def update_node(
     doc_id: str,
-    path: str = Query(..., description="JSON Pointer path"),
+    node_path: str = Query(..., description="JSON Pointer path"),
     req: NodeUpdateRequest = None,
-    service = Depends(get_document_service)
+    document_service: DocumentService = Depends(get_document_service)
 ) -> NodeUpdateResponse:
     """
     Update a node at a specific JSON Pointer path (FR-070c).
     Maps to document_update_node MCP tool.
     """
     try:
-        version = await service.update_node(doc_id, path, req.value)
+        # Call SAME shared service method used by MCP tool
+        new_version = await document_service.update_node(
+            doc_id, node_path, req.node_data, req.version
+        )
         return NodeUpdateResponse(
             document_id=doc_id,
-            path=path,
-            version=version,
+            node_path=node_path,
+            version=new_version,
             message="Node updated successfully"
         )
     except (DocumentNotFoundError, PathNotFoundError) as e:
@@ -2076,23 +2277,26 @@ async def update_node(
         )
 
 @router.post("/{doc_id}/nodes", status_code=status.HTTP_201_CREATED, response_model=NodeUpdateResponse)
-async def insert_node(
+async def create_node(
     doc_id: str,
-    path: str = Query(..., description="JSON Pointer path"),
+    node_path: str = Query(..., description="JSON Pointer path"),
     req: NodeUpdateRequest = None,
-    service = Depends(get_document_service)
+    document_service: DocumentService = Depends(get_document_service)
 ) -> NodeUpdateResponse:
     """
-    Insert a new node at a specific JSON Pointer path (FR-070d).
-    Maps to document_insert_node MCP tool.
+    Create a new node at a specific JSON Pointer path (FR-070d).
+    Maps to document_create_node MCP tool.
     """
     try:
-        version = await service.insert_node(doc_id, path, req.value)
+        # Call SAME shared service method used by MCP tool
+        created_path, new_version = await document_service.create_node(
+            doc_id, node_path, req.node_data, req.version
+        )
         return NodeUpdateResponse(
             document_id=doc_id,
-            path=path,
-            version=version,
-            message="Node inserted successfully"
+            node_path=created_path,
+            version=new_version,
+            message="Node created successfully"
         )
     except Exception as e:
         # Similar error handling as update_node
@@ -2101,19 +2305,23 @@ async def insert_node(
 @router.delete("/{doc_id}/nodes", response_model=NodeUpdateResponse)
 async def delete_node(
     doc_id: str,
-    path: str = Query(..., description="JSON Pointer path"),
-    service = Depends(get_document_service)
+    node_path: str = Query(..., description="JSON Pointer path"),
+    version: int = Query(..., description="Expected document version for optimistic locking"),
+    document_service: DocumentService = Depends(get_document_service)
 ) -> NodeUpdateResponse:
     """
     Delete a node at a specific JSON Pointer path (FR-070e).
     Maps to document_delete_node MCP tool.
     """
     try:
-        version = await service.delete_node(doc_id, path)
+        # Call SAME shared service method used by MCP tool
+        deleted_content, new_version = await document_service.delete_node(
+            doc_id, node_path, version
+        )
         return NodeUpdateResponse(
             document_id=doc_id,
-            path=path,
-            version=version,
+            node_path=node_path,
+            version=new_version,
             message="Node deleted successfully"
         )
     except Exception as e:
@@ -2122,14 +2330,14 @@ async def delete_node(
 
 @router.get("/", response_model=DocumentListResponse)
 async def list_documents(
-    service = Depends(get_document_service)
+    document_service: DocumentService = Depends(get_document_service)
 ) -> DocumentListResponse:
     """
     List all document IDs (FR-070f).
     Maps to document_list MCP tool.
     """
     try:
-        doc_ids = await service.list_documents()
+        doc_ids = await document_service.list_documents()
         return DocumentListResponse(documents=doc_ids, count=len(doc_ids))
     except Exception as e:
         raise HTTPException(
@@ -2148,25 +2356,27 @@ def get_schema_service(request: Request):
     return request.app.state.schema_service
 
 @router.get("/", response_model=SchemaResponse)
-async def get_root_schema(service = Depends(get_schema_service)) -> SchemaResponse:
+async def get_root_schema(
+    schema_service: SchemaService = Depends(get_schema_service)
+) -> SchemaResponse:
     """
     Get the full JSON Schema (FR-070g).
     Maps to schema_get_root MCP tool.
     """
-    schema = service.get_schema()
-    return SchemaResponse(schema_uri=service.schema_uri, schema=schema)
+    root_schema = schema_service.get_schema()
+    return SchemaResponse(schema_uri=schema_service.schema_uri, root_schema=root_schema)
 
 @router.get("/node", response_model=SchemaNodeResponse)
 async def get_node_schema(
-    path: str = Query(..., description="JSON Pointer path"),
-    service = Depends(get_schema_service)
+    node_path: str = Query(..., description="JSON Pointer path"),
+    schema_service: SchemaService = Depends(get_schema_service)
 ) -> SchemaNodeResponse:
     """
     Get schema for a specific node (FR-070h).
     Maps to schema_get_node MCP tool.
     """
-    node_schema = service.get_node_schema(path)
-    return SchemaNodeResponse(path=path, node_schema=node_schema)
+    node_schema = schema_service.get_node_schema(node_path)
+    return SchemaNodeResponse(node_path=node_path, node_schema=node_schema)
 
 
 # src/json_schema_mcp/rest_api/routes/health.py
@@ -2292,37 +2502,40 @@ if __name__ == "__main__":
 
 **Tasks:**
 - [ ] Create `api_server.py` with FastAPI app initialization
-- [ ] Implement all 8 REST endpoints (POST /documents, GET /documents/{doc_id}, PUT /documents/{doc_id}, POST /documents/{doc_id}/nodes, DELETE /documents/{doc_id}/nodes, GET /documents, GET /schema, GET /schema/node)
-- [ ] Create Pydantic models for all request/response bodies (FR-070a-h)
-- [ ] Implement error handling middleware mapping 22 error codes to HTTP status codes (FR-069b)
+- [ ] Implement all 8 REST endpoints as thin wrappers (parse HTTP → call SAME service methods as MCP → format HTTP response)
+- [ ] Create Pydantic models for all request/response bodies (FR-070a-h) - data transfer objects only
+- [ ] Implement error handling middleware mapping 22 error codes to HTTP status codes (FR-069b) - format only, errors from service layer
 - [ ] Configure CORS middleware (FR-070i)
 - [ ] Update `__main__.py` to support `--mode` argument (mcp vs rest)
 - [ ] Configure OpenAPI/Swagger UI at /docs (FR-070b)
 - [ ] Configure ReDoc at /redoc
 - [ ] Add health check endpoint at /health
-- [ ] Ensure both interfaces share same service layer (DRY)
+- [ ] Ensure both interfaces share SAME service layer instances (DRY) - no separate service instances
 - [ ] Test all endpoints with Swagger UI
-- [ ] Verify identical functionality between MCP tools and REST endpoints
+- [ ] Verify identical functionality between MCP tools and REST endpoints (same service method calls)
+- [ ] Verify NO business logic in REST routes (all in shared services)
 
 **Test Cases:**
-- All 8 REST endpoints work correctly
-- Pydantic validation rejects invalid requests
-- Error codes map to correct HTTP status codes (200, 201, 400, 404, 408, 409, 422, 500)
+- All 8 REST endpoints work correctly and call correct service methods
+- Pydantic validation rejects invalid requests (input validation only)
+- Error codes from service layer map to correct HTTP status codes (200, 201, 400, 404, 408, 409, 422, 500)
 - CORS headers present in responses
 - Swagger UI accessible and functional
 - OpenAPI spec validates against OpenAPI 3.1
 - REST API independently usable without MCP client
-- Both interfaces provide identical functionality
-- Service layer shared correctly (no code duplication)
+- **Interface parity test**: Both interfaces call SAME service methods with SAME parameters
+- **Service layer test**: Unit tests target service layer, integration tests verify both interfaces use same services
+- **Zero duplication test**: No business logic found in REST routes (all in DocumentService/SchemaService)
 
 **Deliverables:**
 - ✅ Runnable REST API server: `python -m json_schema_mcp --mode rest`
-- ✅ All 8 REST endpoints implemented and tested
+- ✅ All 8 REST endpoints implemented as thin wrappers
 - ✅ Swagger UI at http://localhost:8080/docs
 - ✅ OpenAPI 3.1 specification at /openapi.json
 - ✅ CORS configured for browser clients
 - ✅ Dual entry point: MCP (stdio) + REST (HTTP)
-- ✅ Shared business logic layer (no duplication)
+- ✅ Shared business logic layer (100% shared, zero duplication)
+- ✅ Both interfaces use SAME service instances
 
 ---
 
