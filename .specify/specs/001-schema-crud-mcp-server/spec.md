@@ -828,16 +828,14 @@ Retrieves content at a specified node (path) within the document tree.
 
 Returns JSON Schema definition for a specified node (path) within the document tree structure.
 
+**Note**: Since this server has ONE schema for ALL documents, `doc_id` is not required. The schema is the same regardless of which document you're querying about.
+
 **Input Schema**:
 ```json
 {
   "type": "object",
-  "required": ["doc_id", "node_path"],
+  "required": ["node_path"],
   "properties": {
-    "doc_id": {
-      "type": "string",
-      "description": "Document identifier"
-    },
     "node_path": {
       "type": "string",
       "pattern": "^/",
@@ -862,10 +860,6 @@ Returns JSON Schema definition for a specified node (path) within the document t
     "node_schema": {
       "type": "object",
       "description": "JSON Schema definition for the node at this path"
-    },
-    "node_exists": {
-      "type": "boolean",
-      "description": "Whether the node path exists in current document"
     }
   }
 }

@@ -156,6 +156,7 @@ json-schema-mcp-tool/
 │   │   └── test_atomic_operations.py
 │   └── fixtures/
 │       ├── schemas/                    # Test JSON schemas
+│       │   └── text.json               # Simple schema for unit testing (title, authors, sections/paragraphs)
 │       └── documents/                  # Test documents
 │
 ├── pyproject.toml                      # Python project config (Poetry/pip)
@@ -174,7 +175,7 @@ json-schema-mcp-tool/
 |-----------|----------|----------------------------|---------------|-----------------|----------------------|-----------------|-------|
 | Create document | `document_create()` | NONE | `POST /documents` | NONE (no body) | `DocumentService.create_document()` | `(doc_id: DocumentId, version: int, initial_content: dict)` | Auto-generates doc_id, initializes with schema defaults |
 | Read node | `document_read_node()` | `doc_id, node_path` | `GET /documents/{doc_id}?node_path=...` | path param, query param | `DocumentService.read_node(doc_id, node_path)` | `(node_content: Any, version: int)` | Returns content at path + current version |
-| Get schema node | `schema_get_node()` | `doc_id, node_path, dereferenced` | `GET /schema/node?node_path=...&dereferenced=...` | query params | `SchemaService.get_node_schema(doc_id, node_path, dereferenced)` | `dict` (schema definition) | Schema introspection for specific path |
+| Get schema node | `schema_get_node()` | `node_path, dereferenced` | `GET /schema/node?node_path=...&dereferenced=...` | query params | `SchemaService.get_node_schema(node_path, dereferenced)` | `dict` (schema definition) | Schema introspection for specific path. No doc_id needed - ONE schema for ALL documents |
 | Update node | `document_update_node()` | `doc_id, node_path, node_data, version` | `PUT /documents/{doc_id}?node_path=...&version=...` | path param, query params, body | `DocumentService.update_node(doc_id, node_path, node_data, version)` | `int` (new version) | Updates node, validates, increments version |
 | Create node | `document_create_node()` | `doc_id, node_path, node_data, version` | `POST /documents/{doc_id}/nodes?node_path=...&version=...` | path param, query params, body | `DocumentService.create_node(doc_id, node_path, node_data, version)` | `(created_node_path: str, new_version: int)` | Creates new node, validates, increments version |
 | Delete node | `document_delete_node()` | `doc_id, node_path, version` | `DELETE /documents/{doc_id}/nodes?node_path=...&version=...` | path param, query params | `DocumentService.delete_node(doc_id, node_path, version)` | `(deleted_node: Any, new_version: int)` | Deletes node, validates, increments version |
@@ -1254,6 +1255,32 @@ class SchemaService:
         # Return dereferenced schema for that location
         pass
     
+    def get_root_schema(self, dereferenced: bool = True) -> dict:
+        """
+        Get the root schema, optionally dereferenced (FR-086).
+        Returns resolved schema if dereferenced=True, raw schema if False.
+        """
+        return self.resolved_schema if dereferenced else self.schema
+    
+    def get_node_schema(self, node_path: str, dereferenced: bool = True) -> dict:
+        """
+        Get schema definition for a specific node path (FR-086, FR-087).
+        
+        Args:
+            node_path: JSON Pointer path to the node
+            dereferenced: Whether to resolve $ref references
+        
+        Returns:
+            Schema definition for the node at the specified path
+        
+        Note: Since this server has ONE schema for ALL documents, no doc_id
+        parameter is needed. The schema is the same regardless of which document
+        you're querying about.
+        """
+        schema = self.resolved_schema if dereferenced else self.schema
+        # Navigate to node_path and return schema for that location
+        return self.get_schema_for_path(node_path)
+    
     def get_defaults(self) -> dict:
         """Extract all default values from resolved schema (FR-088, FR-089)"""
         return self._collect_defaults(self.resolved_schema)
@@ -2330,14 +2357,18 @@ async def delete_node(
 
 @router.get("/", response_model=DocumentListResponse)
 async def list_documents(
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of documents to return"),
+    offset: int = Query(0, ge=0, description="Number of documents to skip"),
     document_service: DocumentService = Depends(get_document_service)
 ) -> DocumentListResponse:
     """
-    List all document IDs (FR-070f).
+    List all document IDs with pagination (FR-070f).
     Maps to document_list MCP tool.
+    
+    **THIN WRAPPER**: Calls document_service.list_documents() - SAME method as MCP tool.
     """
     try:
-        doc_ids = await document_service.list_documents()
+        doc_ids = await document_service.list_documents(limit=limit, offset=offset)
         return DocumentListResponse(documents=doc_ids, count=len(doc_ids))
     except Exception as e:
         raise HTTPException(
@@ -2357,25 +2388,32 @@ def get_schema_service(request: Request):
 
 @router.get("/", response_model=SchemaResponse)
 async def get_root_schema(
+    dereferenced: bool = Query(True, description="Whether to resolve $ref references"),
     schema_service: SchemaService = Depends(get_schema_service)
 ) -> SchemaResponse:
     """
     Get the full JSON Schema (FR-070g).
     Maps to schema_get_root MCP tool.
+    
+    **THIN WRAPPER**: Calls schema_service.get_root_schema() - SAME method as MCP tool.
     """
-    root_schema = schema_service.get_schema()
+    root_schema = schema_service.get_root_schema(dereferenced=dereferenced)
     return SchemaResponse(schema_uri=schema_service.schema_uri, root_schema=root_schema)
 
 @router.get("/node", response_model=SchemaNodeResponse)
 async def get_node_schema(
     node_path: str = Query(..., description="JSON Pointer path"),
+    dereferenced: bool = Query(True, description="Whether to resolve $ref references"),
     schema_service: SchemaService = Depends(get_schema_service)
 ) -> SchemaNodeResponse:
     """
     Get schema for a specific node (FR-070h).
     Maps to schema_get_node MCP tool.
+    
+    **THIN WRAPPER**: Calls schema_service.get_node_schema() - SAME method as MCP tool.
+    Note: No doc_id needed - ONE schema for ALL documents in this server instance.
     """
-    node_schema = schema_service.get_node_schema(node_path)
+    node_schema = schema_service.get_node_schema(node_path=node_path, dereferenced=dereferenced)
     return SchemaNodeResponse(node_path=node_path, node_schema=node_schema)
 
 
@@ -2564,10 +2602,20 @@ tests/
 │   └── test_end_to_end.py
 └── fixtures/
     ├── schemas/
-    │   ├── book.schema.json
-    │   └── invalid.schema.json
+    │   ├── text.json                # Primary test schema (copied from schemas/text.json in repo)
+    │   └── invalid.schema.json      # Invalid schema for error handling tests
     └── documents/
-        └── book-example.json
+        └── text-example.json        # Example text document for testing
+
+**Test Schema: text.json**
+- **Purpose**: Unit testing DocumentService operations against spec requirements
+- **Location**: Copied from `schemas/text.json` in repository root to test fixtures
+- **Structure**: Simple document with `title` (string), `authors` (array), `sections` (array of objects with title and paragraphs)
+- **Features**: 
+  - Required fields with defaults (`sections: []`) to test document creation with minimal content
+  - Nested structure to test JSON Pointer navigation
+  - Array operations to test create/update/delete on array elements
+- **Usage**: All DocumentService unit tests will use this schema to ensure proper validation, node operations, and version control
 ```
 
 **Test Coverage Goals:**
