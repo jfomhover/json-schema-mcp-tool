@@ -15,6 +15,17 @@
 - Q: What should the parameter name be for document identifiers? → A: Use `doc_id` consistently throughout to make it clear these are document identifiers, not generic identifiers.
 - Q: What is the primary purpose and scope of the CRUD operations? → A: The purpose is to manage **complete documents** (e.g., books, articles). The MCP server provides **granular path-based CRUD operations** on sections/subsections of the JSON tree, enabling agents to make surgical edits (update a chapter title, add a footnote, delete a paragraph) without replacing entire documents. This is NOT a generic JSON editor - it's a document-centric system with path-based editing capabilities that maintains whole-document validity.
 - Q: How should document creation work - should doc_id be provided by the caller or auto-generated? → A: **Auto-generated approach**: `document_create` takes NO arguments and returns a system-generated unique doc_id. This enables agents to create documents on-demand and then populate them incrementally using CRUD operations. The system initializes a minimal valid document structure (empty object or schema defaults) that the agent builds upon.
+- Q: How should validation errors be reported? → A: **Comprehensive error reporting**: System MUST return ALL validation errors in a single report, not fail on first error. Each error includes: machine-readable code, human-readable actionable message, JSON Pointer to exact location, violated constraint, expected value, and actual value. This enables agents to fix all issues in one pass rather than trial-and-error iteration.
+- Q: How should document initialization handle required fields without defaults? → A: **Strict initialization**: If the schema has required fields without default values, `document_create` MUST fail with a clear error. The system will ONLY populate fields that have explicit `default` values defined in the JSON Schema. No implicit defaults (empty strings, zeros, etc.) are allowed. This ensures every created document is immediately valid and prevents ambiguity about what "minimal valid" means.
+- Q: When should validation occur during update/create/delete operations? → A: **Validation-before-modification**: System MUST validate BEFORE modifying any state. Process: (1) Clone current document, (2) Apply modification to clone, (3) Validate ENTIRE cloned document tree, (4) If valid: persist atomically and update in-memory state, (5) If invalid: discard clone, return all errors, no state change. This ensures true atomicity - operations either fully succeed or fully fail with no partial modifications.
+- Q: How should concurrent operations on the same document be handled? → A: **Optimistic locking with version/etag**: Each document has a version identifier that increments on every write. Read operations return current version. Write operations (update/create/delete) require version parameter and fail if document version has changed since read. Read operations never block writes. Lock acquisition timeout hardcoded at 10 seconds. This prevents lost updates while allowing high concurrency.
+- Q: What is the initial version value for newly created documents? → A: **Version starts at 1**: When `document_create` creates a new document, it is initialized with `version: 1`. All subsequent write operations (update/create_node/delete_node) increment the version counter. This means version 0 never exists - the first readable version is always 1.
+- Q: How should schema default values with $ref resolution work? → A: **Recursive $ref resolution for defaults**: System MUST recursively resolve ALL $ref references during schema loading and merge default values from referenced schemas. When initializing documents, defaults are collected from the entire resolved schema tree. If a $ref target has defaults, they apply. This ensures consistent initialization regardless of schema composition patterns.
+- Q: What should happen when path operations target non-existent intermediate paths? → A: **Fail with detailed path error**: System MUST NOT auto-create intermediate paths. Operations on paths like `/a/b/c` when `/a/b` doesn't exist MUST fail with error code `path-not-found` including: the requested path, the deepest existing ancestor path, and guidance on which path to create first. This prevents unintended structure creation and keeps document evolution explicit and intentional.
+- Q: Should error codes be enumerated as a closed set? → A: **Exhaustive error code enumeration**: System MUST define a complete, versioned list of ALL possible error codes as part of the API contract. Each code must have: machine-readable identifier, HTTP-style category (4xx client error, 5xx server error), description, typical causes, and remediation guidance. This enables robust error handling in client code without string parsing.
+- Q: What should the storage directory structure be? → A: **Flat directory with doc_id as filename**: All documents stored in a single configured directory as `{doc_id}.json` files (e.g., `./data/01JDEX3M8K2N9WPQR5STV6XY7Z.json`). Temporary files use `.tmp` suffix during writes. Flat structure simplifies implementation, avoids nested directory limits, and enables easy backup/sync. Future optimization can introduce sharding subdirectories (e.g., first 2 chars of doc_id) if needed for >10k documents.
+- Q: What doc_id generation algorithm should be used? → A: **ULID (Universally Unique Lexicographically Sortable Identifier)**: Use ULID format for auto-generated doc_id values. Benefits: 26-character case-insensitive encoding, timestamp-ordered (sortable), 128-bit random component (collision-resistant), filesystem-safe (no special chars), more human-friendly than UUIDs. Standard ULID libraries available in all languages. Example: `01JDEX3M8K2N9WPQR5STV6XY7Z`.
+- Q: What are the transaction boundaries for file system operations? → A: **Document-level atomic boundaries**: Each document operation (create/update/delete) is an atomic transaction bounded by a single document. Write operations use: (1) Clone document in-memory, (2) Apply modification to clone, (3) Validate entire clone, (4) Write to `{doc_id}.tmp` file, (5) fsync() to ensure durable storage, (6) Atomic rename to `{doc_id}.json`. No cross-document transactions. Consistency guaranteed at individual document level only.
 
 ## Overview
 
@@ -56,11 +67,11 @@ An agent wants to create a new document instance (e.g., a book) that will be pop
 
 **Acceptance Scenarios**:
 
-1. **Given** the server is initialized with a JSON schema, **When** agent calls document_create with no arguments, **Then** system generates a unique doc_id, creates a minimal valid document (empty object or schema defaults), and returns the doc_id
-2. **Given** a schema with required fields, **When** agent creates a new document, **Then** system initializes those required fields with default values or null placeholders that pass minimal validation
-3. **Given** a schema with default values specified, **When** agent creates a new document, **Then** system initializes the document with those schema-defined defaults
+1. **Given** the server is initialized with a JSON schema, **When** agent calls document_create with no arguments, **Then** system generates a unique doc_id, creates a document with all schema-defined defaults, and returns the doc_id
+2. **Given** a schema with required fields that have default values, **When** agent creates a new document, **Then** system initializes those required fields with the schema-defined defaults
+3. **Given** a schema with required fields without default values, **When** agent attempts to create a new document, **Then** system MUST fail with error "Cannot create document: schema has required fields without defaults" and list the missing required fields
 4. **Given** multiple sequential document_create calls, **When** agent creates documents, **Then** each returns a unique doc_id with no collisions
-5. **Given** a newly created document, **When** agent queries its content at root path "/", **Then** system returns the minimal initialized structure that is schema-valid
+5. **Given** a newly created document, **When** agent queries its content at root path "/", **Then** system returns the initialized structure with all schema defaults applied, passing full schema validation
 
 ---
 
@@ -111,13 +122,14 @@ A user wants to modify specific content within a document at a given path, with 
 
 **Acceptance Scenarios**:
 
-1. **Given** a document exists, **When** user updates path "/metadata/title" with valid string, **Then** system validates against schema, persists change, and returns success with updated content
-2. **Given** a document exists, **When** user updates with invalid data type (e.g., number where string expected), **Then** system rejects with detailed validation error
-3. **Given** a required field in schema, **When** user attempts to update to null or undefined, **Then** system rejects with required field violation error
-4. **Given** an update to nested path, **When** parent path doesn't exist, **Then** system either creates parent structure (if schema allows) or returns error
-5. **Given** an array field, **When** user updates specific index, **Then** system validates array item against schema and persists change
-6. **Given** update violates schema constraints (min/max length, pattern, format), **When** validation fails, **Then** system returns specific constraint violation details
-7. **Given** concurrent updates to same document, **When** both updates conflict, **Then** system handles according to conflict resolution strategy (optimistic locking, last-write-wins)
+1. **Given** a document exists with version 5, **When** user reads document (getting version 5), then updates path "/metadata/title" with valid string and version 5, **Then** system validates version matches, clones document, applies change to clone, validates entire clone, persists atomically, increments version to 6, and returns success with new version
+2. **Given** a document exists, **When** user updates with invalid data causing validation failure, **Then** system discards clone without persisting, original document unchanged, returns comprehensive validation report with ALL errors
+3. **Given** a required field in schema, **When** user attempts to update to null, **Then** system validates clone, detects required field violation, discards clone, returns complete validation report
+4. **Given** an update to nested path like "/a/b/c", **When** intermediate path "/a/b" doesn't exist, **Then** system returns error code `path-not-found` with deepest existing ancestor path and guidance, no state change
+5. **Given** an array field, **When** user updates specific index, **Then** system applies to clone, validates entire cloned tree, persists atomically if valid
+6. **Given** update violates multiple schema constraints, **When** validation of cloned document fails, **Then** system discards clone and returns ALL constraint violations in single report enabling batch fixes
+7. **Given** document at version 5, **When** user attempts update with version 3 (stale), **Then** system detects version conflict, rejects operation with error code `version-conflict`, returns current version 5 for client to retry
+8. **Given** concurrent updates to same document, **When** first update succeeds incrementing version, **Then** second update with old version fails with `version-conflict`, client must re-read and retry
 
 ---
 
@@ -131,11 +143,11 @@ A user wants to add new content to an existing document at a specific path, such
 
 **Acceptance Scenarios**:
 
-1. **Given** a document with an array field, **When** user creates new item in array (e.g., "/content/chapters/-"), **Then** system validates new item against array item schema and appends to array
-2. **Given** a path to optional property that doesn't exist, **When** user creates content at that path, **Then** system validates against schema and adds the property
-3. **Given** a path that already exists, **When** user attempts to create, **Then** system returns conflict error
-4. **Given** a create operation with invalid data, **When** validation fails, **Then** system returns detailed validation errors without modifying document
-5. **Given** nested path where intermediary paths don't exist, **When** user creates, **Then** system either auto-creates intermediate structure or returns error based on schema additionalProperties settings
+1. **Given** a document with an array field, **When** user creates new item in array (e.g., "/content/chapters/-"), **Then** system validates new item against array item schema and appends to array, returning ALL validation errors if any exist
+2. **Given** a path to optional property that doesn't exist, **When** user creates content at that path, **Then** system validates against schema and adds the property, providing comprehensive error report if validation fails
+3. **Given** a path that already exists, **When** user attempts to create, **Then** system returns error code `conflict` with clear explanation
+4. **Given** a create operation with multiple invalid fields, **When** validation fails, **Then** system returns complete validation report with ALL errors without modifying document
+5. **Given** nested path like "/a/b/c" where intermediate paths "/a/b" don't exist, **When** user attempts create, **Then** system returns error code `path-not-found` with deepest existing ancestor and guidance on which path to create first (explicit path creation required)
 
 ---
 
@@ -193,42 +205,129 @@ A client application wants to retrieve the complete JSON document for purposes s
 
 ### Edge Cases
 
-- What happens when a JSON path references an array element that is out of bounds?
-  - System returns "index out of bounds" error with current array length
-- How does system handle very large documents (>100MB) in memory?
-  - System uses streaming validation for large documents and path-based access to avoid loading entire document into agent context
-- What happens when an agent tries to read the root path of a very large document?
-  - System returns the full document but warns that for large documents, agents should use specific paths; client applications should use the export mechanism (MCP resource URI)
-- What happens when schema file is modified while server is running?
-  - Server continues using the loaded schema in memory; schema changes require server restart
-- What if users need to manage documents with different schemas?
-  - They must run separate server instances, each initialized with a different schema
-- How does system handle schema validation timeouts for complex schemas?
-  - Configurable timeout with graceful error reporting; validation complexity limits documented
-- What happens when JSON path contains special characters or escape sequences?
-  - System uses RFC 6901 (JSON Pointer) standard encoding/decoding
-- How are concurrent operations on the same document serialized?
-  - Document-level locking with configurable timeout; operations queue or fail-fast based on configuration
-- What happens if storage backend becomes unavailable during operation?
-  - Operation fails with storage error; no partial writes; transaction rollback where supported
-- How does system validate circular references in schemas?
-  - Schema validation detects circular $ref chains; runtime validation handles recursive structures with depth limits
-- How do client applications export complete documents after agent editing?
-  - Client applications use MCP resource URIs (e.g., `schema://doc_id`) or direct file access when sharing storage layer with server
-- What happens if the storage directory doesn't exist or lacks write permissions?
-  - System initialization fails with clear error message; storage directory must be created and writable before server starts
-- How does the storage abstraction layer ensure future cloud migration compatibility?
-  - Storage interface defines all CRUD operations independently of implementation; local file storage is one implementation; future cloud NoSQL implementations will satisfy same interface
-- What happens if server is started without a schema configuration?
-  - Server fails to start with error message requiring schema file path in configuration
+- **What happens when a schema has required fields without default values?**
+  - `document_create` fails immediately with error code `required-field-without-default`, listing all required fields that lack defaults. System enforces strict initialization - only explicit defaults are used.
+
+- **What happens if validation fails after applying a modification?**
+  - The cloned document is discarded, original document remains unchanged in memory and on disk, and comprehensive validation report with ALL errors is returned to caller. Zero partial modifications occur.
+
+- **What happens if file write succeeds but rename fails?**
+  - Operation fails, temporary `.tmp` file remains on disk (cleaned up on next server start), original document file unchanged, in-memory state unchanged. Operation can be safely retried.
+
+- **What happens during concurrent updates to the same document?**
+  - System uses optimistic locking with version counters. First operation with correct version succeeds and increments version. Second operation with stale version fails with `version-conflict` error. Client must re-read document (getting new version) and retry. 10-second document lock timeout applies.
+
+- **What happens when document version doesn't match in write operation?**
+  - System immediately rejects operation with error code `version-conflict`, returning expected version and current version. No modification occurs. Client must re-read document to get current state and version, then retry operation.
+
+- **What happens when a JSON path references an array element that is out of bounds?**
+  - System returns error code `path-not-found` with current array length and guidance.
+
+- **How does system handle schema with $ref references and default values?**
+  - System recursively resolves ALL $ref references during schema loading at startup. Default values from referenced schemas are merged into resolved tree. Document initialization uses defaults from entire resolved schema regardless of $ref composition.
+
+- **What happens when path operation targets non-existent intermediate path (e.g., `/a/b/c` when `/a/b` doesn't exist)?**
+  - System fails with error code `path-not-found`, including: requested path, deepest existing ancestor path, and explicit guidance on which path to create first. NO auto-creation of intermediate paths - document structure evolution must be intentional.
+
+- **How are error codes versioned and documented?**
+  - Error codes are exhaustive enumeration in API contract. Each code includes: kebab-case identifier, HTTP category (4xx/5xx), description, causes, remediation. Error codes are stable across minor versions. New codes may be added; existing codes never change meaning.
+
+- **What storage directory structure is used?**
+  - Flat directory structure: all documents stored as `{doc_id}.json` in single configured directory (e.g., `./data/01JDEX3M8K2N9WPQR5STV6XY7Z.json`). Temporary files use `.tmp` suffix. Simple, efficient for MVP, can add sharding subdirectories for >10k documents.
+
+- **What format are auto-generated doc_id values?**
+  - ULID (Universally Unique Lexicographically Sortable Identifier): 26-character case-insensitive string, timestamp-ordered, 128-bit random, filesystem-safe. Example: `01JDEX3M8K2N9WPQR5STV6XY7Z`. Standard library used for generation.
+
+- **What are transaction boundaries for operations?**
+  - Document-level atomic transactions only. Each document operation is isolated atomic unit. NO cross-document transactions. Write workflow: clone → modify → validate → write `.tmp` → fsync() → atomic rename to `.json`. Consistency guaranteed at individual document level.
+
+- **How does system handle very large documents (>100MB) in memory?**
+  - System uses streaming validation for large documents and path-based access to avoid loading entire document into agent context.
+
+- **What happens when an agent tries to read the root path of a very large document?**
+  - System returns the full document but for large documents, agents should use specific paths; client applications should use the export mechanism (MCP resource URI).
+
+- **What happens when schema file is modified while server is running?**
+  - Server continues using the loaded schema in memory; schema changes require server restart.
+
+- **What if users need to manage documents with different schemas?**
+  - They must run separate server instances, each initialized with a different schema (single-schema-per-server architecture).
+
+- **What happens when JSON path contains special characters or escape sequences?**
+  - System uses RFC 6901 (JSON Pointer) standard encoding/decoding.
+
+- **What happens if storage backend becomes unavailable during operation?**
+  - Operation fails with error code `storage-write-failed` or `storage-read-failed`; no partial writes; transaction rollback.
+
+- **How does system validate circular references in schemas?**
+  - Schema loading fails with error code `schema-resolution-failed` if circular $ref chains detected; runtime validation handles recursive structures with depth limits.
+
+- **How do client applications export complete documents after agent editing?**
+  - Client applications use MCP resource URIs (e.g., `schema://doc_id`) or direct file access when sharing storage layer with server.
+
+- **What happens if the storage directory doesn't exist or lacks write permissions?**
+  - System initialization fails with clear error message; storage directory created automatically if missing, but parent must exist and be writable.
+
+- **What happens if document content file exists but metadata file is missing?**
+  - System treats document as corrupted and logs error. Document is not accessible until metadata is restored or document is recreated. On startup, system can optionally regenerate metadata from content file (with version reset to 1).
+
+- **What happens if metadata file exists but content file is missing?**
+  - System treats document as corrupted. `document_read_node` returns `document-not-found` error. Orphaned metadata files can be cleaned up during startup verification.
+
+- **How does the storage abstraction layer ensure future cloud migration compatibility?**
+  - Storage interface defines all CRUD operations independently of implementation; local file storage is one implementation; future cloud NoSQL implementations will satisfy same interface.
+
+- **What happens if server is started without a schema configuration?**
+  - Server fails to start with error code `schema-load-failed` requiring schema file path in configuration.
+
+- **What happens if schema has circular $ref references?**
+  - Schema loading at startup fails with error code `schema-resolution-failed` detailing the circular reference chain.
+
+- **Do read operations block write operations or vice versa?**
+  - NO. Read operations never block writes. Reads return current version. Optimistic locking handles conflicts. Document-level locks only serialize writes to same document.
 
 ## Requirements *(mandatory)*
+
+### Atomic Operation Workflow
+
+All mutating operations (update, create, delete) follow this mandatory workflow to ensure atomicity:
+
+```
+1. CLONE: Deep clone current document state from memory
+2. MODIFY: Apply requested modification to cloned document
+3. VALIDATE: Run full JSON Schema validation against entire cloned document tree
+4. DECISION:
+   a. If validation PASSES:
+      - Write cloned document to {doc_id}.tmp file
+      - Call fsync() to flush to disk
+      - Atomically rename {doc_id}.tmp to {doc_id}.json
+      - Update in-memory state to cloned document
+      - Return success with validation report (valid=true)
+   b. If validation FAILS:
+      - Discard cloned document immediately
+      - Original document remains unchanged (memory + disk)
+      - Return comprehensive validation report with ALL errors
+      - No state change, operation fully rolled back
+```
+
+**Key Guarantees:**
+- Original document never modified until validation passes
+- Validation sees complete document state, not partial modifications
+- File system operations are atomic (write-then-rename)
+- Failed operations leave zero trace
+- Concurrent operations serialized per document (see concurrency requirements)
 
 ### Functional Requirements
 
 #### Server Initialization & Schema Configuration
 
 - **FR-001**: System MUST be initialized with a single JSON schema at server startup
+- **FR-001a**: System MUST support configuration via environment variables OR JSON configuration file
+- **FR-001b**: System MUST read configuration parameters in order of precedence: (1) environment variables, (2) config file, (3) built-in defaults
+- **FR-001c**: Configuration MUST include required parameter: `SCHEMA_PATH` or `schema_path` (absolute or relative path to JSON Schema file)
+- **FR-001d**: Configuration MUST include optional parameter: `STORAGE_DIR` or `storage_dir` (default: `./data`)
+- **FR-001e**: Configuration MUST include optional parameter: `LOG_LEVEL` or `log_level` (default: `info`, allowed: `debug|info|warn|error`)
+- **FR-001f**: Configuration file location specified by environment variable `CONFIG_FILE` (default: `./config.json`)
 - **FR-002**: System MUST load schema from file path specified in server configuration
 - **FR-003**: System MUST validate the schema itself is valid JSON Schema Draft 2020-12 before accepting it
 - **FR-004**: System MUST fail to start if schema file is missing, unreadable, or invalid
@@ -239,7 +338,10 @@ A client application wants to retrieve the complete JSON document for purposes s
 #### Document Lifecycle
 
 - **FR-008**: System MUST support creating a new document instance with no input arguments, auto-generating a unique doc_id
-- **FR-009**: System MUST initialize new documents with minimal valid content (empty object or schema defaults) that passes schema validation
+- **FR-009**: System MUST initialize new documents ONLY with fields that have explicit `default` values defined in the JSON Schema
+- **FR-009a**: System MUST fail document creation if schema contains required fields without default values, returning clear error listing all missing required fields
+- **FR-009b**: System MUST recursively apply default values from nested schemas and resolved $ref definitions
+- **FR-009c**: System MUST validate the initialized document against the full schema before persisting (it must pass 100% validation)
 - **FR-010**: System MUST auto-generate doc_ids that are unique, URL-safe strings with minimum 8 characters, maximum 256 characters
 - **FR-011**: System MUST persist documents durably (survive server restart)
 - **FR-012**: System MUST return the auto-generated doc_id immediately upon document creation
@@ -250,8 +352,16 @@ A client application wants to retrieve the complete JSON document for purposes s
 
 - **FR-015**: System MUST use local file-based storage for MVP implementation
 - **FR-016**: System MUST store each document as a separate JSON file in a structured directory
+- **FR-016a**: System MUST store document metadata in separate companion file `{doc_id}.meta.json` alongside content file `{doc_id}.json`
+- **FR-016b**: Metadata file MUST contain: `doc_id` (string), `version` (integer), `schema_uri` (string), `created_at` (ISO 8601 timestamp), `modified_at` (ISO 8601 timestamp), `content_size_bytes` (integer)
+- **FR-016c**: System MUST update metadata file atomically using same write-then-rename strategy as content files (`{doc_id}.meta.tmp` → `{doc_id}.meta.json`)
+- **FR-016d**: System MUST keep version counter in metadata file only (NOT embedded in document content)
 - **FR-017**: System MUST use auto-generated doc_id as filename (with .json extension), ensuring filesystem-safe characters
-- **FR-018**: System MUST implement atomic file write operations to prevent corruption
+- **FR-018**: System MUST implement atomic file write operations using write-then-rename strategy
+- **FR-018a**: System MUST write validated document to temporary file `{doc_id}.tmp`
+- **FR-018b**: System MUST call fsync() on temporary file to ensure data is flushed to disk
+- **FR-018c**: System MUST atomically rename `{doc_id}.tmp` to `{doc_id}.json` (atomic at OS level)
+- **FR-018d**: System MUST cleanup any orphaned `.tmp` files on server startup (crash recovery)
 - **FR-019**: System MUST support efficient file-based lookups by doc_id
 - **FR-020**: Storage interface MUST be designed to support future NoSQL backends (MongoDB, DynamoDB, Firestore, CouchDB, etc.) without changes to business logic
 
@@ -289,45 +399,123 @@ A client application wants to retrieve the complete JSON document for purposes s
 
 #### Update Operations
 
-- **FR-041**: System MUST validate update data against schema for target path before applying changes
-- **FR-042**: System MUST support atomic updates (all-or-nothing - no partial updates on validation failure)
+- **FR-041**: System MUST use copy-on-write semantics for all update operations
+- **FR-041a**: System MUST create deep clone of current document state before applying modifications
+- **FR-041b**: System MUST apply modification to cloned document only
+- **FR-041c**: System MUST validate ENTIRE cloned document tree against schema
+- **FR-041d**: System MUST persist cloned document atomically (write-then-rename) if validation passes
+- **FR-041e**: System MUST update in-memory state to cloned document only after successful persistence
+- **FR-041f**: System MUST discard clone and return validation errors if validation fails, leaving original document unchanged
+- **FR-042**: System MUST guarantee atomic updates (all-or-nothing - no partial updates on validation failure)
 - **FR-043**: System MUST preserve document validity after updates (entire document validates against schema)
 - **FR-044**: System MUST prevent updates that would violate required field constraints
 - **FR-045**: System MUST prevent updates that would violate type constraints
 - **FR-046**: System MUST support updating nested paths, including array elements
-- **FR-047**: System MUST return both validation errors and updated content structure on successful update
+- **FR-047**: System MUST return validation report on successful update confirming document validity
 
 #### Create Operations
 
-- **FR-048**: System MUST support creating new content at paths that don't exist (if schema allows)
+- **FR-048**: System MUST use copy-on-write semantics for create operations (same process as updates)
+- **FR-048a**: System MUST clone current document, apply create operation to clone, validate entire cloned tree, then persist if valid
 - **FR-049**: System MUST support appending to arrays using JSON Pointer append notation (`/-`)
-- **FR-050**: System MUST validate created content against schema before persistence
-- **FR-051**: System MUST reject create operations when path already exists (conflict)
+- **FR-050**: System MUST validate entire cloned document against schema before persistence (not just created node)
+- **FR-051**: System MUST reject create operations when path already exists in cloned document (conflict)
 - **FR-052**: System MUST support creating nested structures when parent paths allow additional properties
 
 #### Delete Operations
 
-- **FR-053**: System MUST support deleting content at optional paths
-- **FR-054**: System MUST prevent deletion of required fields
-- **FR-055**: System MUST validate remaining document structure after deletion
-- **FR-056**: System MUST prevent deletions that would violate schema constraints (e.g., minItems)
-- **FR-057**: System MUST support deleting array elements with automatic reindexing
+- **FR-053**: System MUST use copy-on-write semantics for delete operations (same process as updates)
+- **FR-053a**: System MUST clone current document, apply delete operation to clone, validate entire remaining tree, then persist if valid
+- **FR-054**: System MUST prevent deletion of required fields (detected during validation of cloned document)
+- **FR-055**: System MUST validate remaining document structure after deletion in clone before persisting
+- **FR-056**: System MUST prevent deletions that would violate schema constraints like minItems (detected during validation)
+- **FR-057**: System MUST support deleting array elements with automatic reindexing in cloned document
 
 #### Validation & Error Handling
 
 - **FR-058**: System MUST use JSON Schema Draft 2020-12 or later for validation
-- **FR-059**: System MUST provide detailed validation errors with JSON Pointer to specific failed constraint
-- **FR-060**: System MUST return error messages including: error code, human-readable message, JSON path, schema constraint violated, and actual value provided
+- **FR-059**: System MUST perform COMPLETE validation and return ALL errors in a single validation report (not fail-fast on first error)
+- **FR-060**: System MUST return comprehensive validation reports including: array of ALL validation errors, each with error code, human-readable message, JSON Pointer to exact location, schema constraint violated, actual value provided, and expected constraint
 - **FR-061**: System MUST validate at every boundary: input validation, pre-persistence validation, post-retrieval validation
-- **FR-062**: System MUST fail fast on validation errors (halt immediately, return detailed error)
-- **FR-063**: System MUST log all validation failures with full context
+- **FR-062**: System MUST provide actionable error messages that clearly explain what needs to be fixed and how
+- **FR-063**: System MUST log all validation failures with full context for debugging
+- **FR-064**: System MUST return validation errors in a structured format that enables programmatic processing and batch fixes
+
+#### Concurrency Control
+
+- **FR-075**: System MUST implement optimistic locking using document version identifiers (integer counter or etag)
+- **FR-075a**: System MUST initialize new documents with version counter starting at 1 (version 0 never exists)
+- **FR-076**: System MUST increment document version on every successful write operation (update, create node, delete node)
+- **FR-077**: System MUST return current document version in all read operations (document_read_node output)
+- **FR-078**: System MUST require version parameter in all write operation inputs (document_update_node, document_create_node, document_delete_node)
+- **FR-079**: System MUST validate version parameter matches current document version before applying write operation
+- **FR-080**: System MUST fail write operations with error code `version-conflict` if document version has changed since client's read
+- **FR-081**: Read operations (document_read_node, schema_get_node) MUST NOT block or be blocked by write operations
+- **FR-082**: System MUST use document-level lock timeout of 10 seconds (hardcoded, not configurable)
+- **FR-082a**: System MUST implement document locks using in-memory mutex/lock map keyed by doc_id
+- **FR-082b**: Write operations MUST acquire exclusive lock on doc_id before cloning document (blocking operation with timeout)
+- **FR-082c**: System MUST release lock immediately after successful write (after atomic rename) or on operation failure
+- **FR-082d**: System MUST fail write operation with error code `lock-timeout` if lock cannot be acquired within 10 seconds
+- **FR-082e**: System MUST implement lock cleanup on abnormal termination (e.g., process crash) by releasing all locks on server restart
+- **FR-083**: System MUST serialize write operations to the same document (only one write at a time per document)
+- **FR-084**: System MUST allow concurrent read operations on the same document
+- **FR-085**: System MUST allow concurrent operations on different documents without interference
+
+#### Schema Resolution & Defaults
+
+- **FR-086**: System MUST recursively resolve ALL $ref references during schema loading at server startup
+- **FR-087**: System MUST merge default values from referenced schemas into the resolved schema tree
+- **FR-088**: When initializing documents, system MUST collect defaults from the entire resolved schema tree (including $ref targets)
+- **FR-089**: System MUST apply defaults consistently regardless of whether schema uses inline definitions or $ref composition
+- **FR-090**: System MUST fail with clear error if $ref resolution encounters circular references or unresolvable references
+
+#### Path Operations & Validation
+
+- **FR-091**: System MUST NOT auto-create intermediate paths for nested operations
+- **FR-092**: When path operation targets non-existent intermediate path (e.g., `/a/b/c` when `/a/b` doesn't exist), system MUST fail with error code `path-not-found`
+- **FR-093**: Path error responses MUST include: requested path, deepest existing ancestor path, and guidance on which path to create first
+- **FR-094**: System MUST require explicit path creation to make document evolution intentional and prevent accidental structure creation
+
+#### Error Code Specification
+
+- **FR-095**: System MUST define exhaustive enumeration of ALL possible error codes as versioned API contract
+- **FR-096**: Each error code MUST include: machine-readable identifier (kebab-case string), HTTP-style category (4xx client/5xx server), description, typical causes, and remediation guidance
+- **FR-097**: System MUST maintain error code stability across minor versions (no breaking changes to existing codes)
+- **FR-098**: System MUST document all error codes in API specification with examples
+- **FR-099**: New error codes MAY be added in minor versions; existing codes MUST NOT change meaning
+
+#### Storage Directory Structure
+
+- **FR-100**: System MUST use flat directory structure with all documents in single configured directory
+- **FR-101**: System MUST store documents with filename pattern `{doc_id}.json` (e.g., `01JDEX3M8K2N9WPQR5STV6XY7Z.json`)
+- **FR-102**: System MUST use `.tmp` suffix for temporary files during write operations (e.g., `{doc_id}.tmp`)
+- **FR-103**: System MUST configure storage directory path at server startup (e.g., `./data/` or absolute path)
+- **FR-104**: System MUST create storage directory if it doesn't exist at startup
+- **FR-105**: System MUST validate storage directory is writable at startup and fail fast if not
+- **FR-106**: Future optimization MAY introduce sharding subdirectories (e.g., first 2 chars of doc_id) when document count exceeds 10,000
+
+#### Document ID Generation
+
+- **FR-107**: System MUST use ULID (Universally Unique Lexicographically Sortable Identifier) format for auto-generated doc_id values
+- **FR-108**: Generated doc_ids MUST be: 26-character case-insensitive encoding, timestamp-ordered (sortable by creation time), 128-bit random component for collision resistance
+- **FR-109**: Generated doc_ids MUST be filesystem-safe (no special characters requiring escaping)
+- **FR-110**: System MUST use standard ULID library for generation (not custom implementation)
+- **FR-111**: Example valid doc_id: `01JDEX3M8K2N9WPQR5STV6XY7Z`
+
+#### Transaction Boundaries
+
+- **FR-112**: System MUST implement document-level atomic transactions (each document operation is an atomic unit)
+- **FR-113**: System MUST NOT support cross-document transactions (no multi-document atomicity)
+- **FR-114**: Write transaction workflow MUST follow: (1) Clone document in-memory, (2) Apply modification to clone, (3) Validate entire clone, (4) Write to `{doc_id}.tmp`, (5) fsync() for durability, (6) Atomic rename to `{doc_id}.json`
+- **FR-115**: System MUST guarantee consistency at individual document level only
+- **FR-116**: System MUST ensure each document operation either fully succeeds or fully fails (no partial modifications visible)
 
 #### MCP Protocol Integration
 
-- **FR-064**: System MUST expose all operations as MCP tools with JSON Schema input definitions
-- **FR-065**: System MUST return results conforming to MCP response format
-- **FR-066**: System MUST map errors to MCP error response structure
-- **FR-067**: System MUST support MCP resource URIs for document access (e.g., `schema://doc_id` for full document export)
+- **FR-065**: System MUST expose all operations as MCP tools with JSON Schema input definitions
+- **FR-066**: System MUST return results conforming to MCP response format
+- **FR-067**: System MUST map errors to MCP error response structure with full validation reports
+- **FR-068**: System MUST support MCP resource URIs for document access (e.g., `schema://doc_id` for full document export)
 - **FR-068**: Each MCP tool MUST declare its input schema including doc_id and path parameters
 - **FR-069**: Each MCP tool MUST declare its output schema for type-safe responses
 
@@ -341,17 +529,23 @@ A client application wants to retrieve the complete JSON document for purposes s
 
 ### Key Entities
 
-- **Document**: A JSON data structure instance conforming to a specific JSON schema, identified by unique doc_id (string). Contains metadata (schema reference, creation time, last modified) and content (the actual JSON data tree). Stored as individual JSON file in MVP implementation.
+- **Configuration**: Server configuration parameters loaded at startup from environment variables or JSON config file. Required: `schema_path` (path to JSON Schema file). Optional: `storage_dir` (document storage directory, default `./data`), `log_level` (logging verbosity, default `info`). Precedence order: environment variables override config file, config file overrides built-in defaults.
 
-- **Schema**: A JSON Schema definition (Draft 2020-12) describing valid structure, types, and constraints for documents. Referenced by URI, contains validation rules and structural definitions. Server is initialized with exactly one schema.
+- **Document**: A JSON data structure instance conforming to a specific JSON schema, identified by unique doc_id (ULID format, 26 characters). Physical storage consists of TWO files: `{doc_id}.json` (content) and `{doc_id}.meta.json` (metadata including version counter, timestamps, schema reference). Version counter is stored in metadata file only, not in document content. Both files written atomically using write-then-rename strategy.
 
-- **Path**: A JSON Pointer (RFC 6901) string identifying a specific location within a document's tree structure. Examples: `/`, `/metadata/title`, `/content/chapters/0/title`.
+- **Schema**: A JSON Schema definition (Draft 2020-12) describing valid structure, types, and constraints for documents. Referenced by URI, contains validation rules, structural definitions, and default values. Server is initialized with exactly one schema at startup. All $ref references are recursively resolved during schema loading.
 
-- **Operation**: A typed CRUD action (Create, Read, Update, Delete, GetSchema) with parameters including doc_id, path, and optional data payload. Returns typed result with success/error status.
+- **Path**: A JSON Pointer (RFC 6901) string identifying a specific location within a document's tree structure. Examples: `/`, `/metadata/title`, `/content/chapters/0/title`. Intermediate paths must exist; system does not auto-create missing paths.
 
-- **ValidationError**: A structured error type containing: error code, human message, JSON pointer to violation location, constraint violated, expected value/type, actual value provided, and schema reference.
+- **Operation**: A typed CRUD action (Create, Read, Update, Delete, GetSchema) with parameters including doc_id, path, optional version (for writes), and optional data payload. Returns typed result with success/error status. Write operations are document-level atomic transactions.
 
-- **StorageAdapter**: An abstraction interface defining storage operations (save, load, delete, exists, list) independent of implementation. MVP uses file-based adapter; future adapters will support cloud NoSQL databases.
+- **ValidationError**: A structured error type containing: error code (kebab-case string), HTTP-style category (4xx/5xx), human message, JSON pointer to violation location, constraint violated, expected value/type, actual value provided, schema reference, and remediation guidance.
+
+- **StorageAdapter**: An abstraction interface defining storage operations (save, load, delete, exists, list) independent of implementation. MVP uses file-based adapter with flat directory structure; future adapters will support cloud NoSQL databases.
+
+- **Version**: Integer counter starting at 1 for newly created documents, incremented on every write operation. Used for optimistic locking - reads return current version, writes require matching version parameter. Prevents lost updates in concurrent scenarios. Version 0 never exists.
+
+- **doc_id**: ULID (Universally Unique Lexicographically Sortable Identifier) - 26-character case-insensitive string, timestamp-ordered, filesystem-safe. Example: `01JDEX3M8K2N9WPQR5STV6XY7Z`. Auto-generated by document_create.
 
 ## Success Criteria *(mandatory)*
 
@@ -360,7 +554,8 @@ A client application wants to retrieve the complete JSON document for purposes s
 - **SC-001**: Users can create a schema-validated document and receive a unique identifier in under 500ms for documents up to 10MB
 - **SC-002**: System rejects 100% of schema-invalid data with detailed error messages including JSON pointer to error location
 - **SC-003**: Users can retrieve content at any path depth in under 100ms for documents up to 10MB
-- **SC-004**: System maintains document validity - 100% of operations either complete successfully with valid result or fail completely with no partial changes
+- **SC-004**: System maintains document validity - 100% of operations either complete successfully with valid result or fail completely with no partial changes (verified by: clone-validate-persist workflow, operations never leave documents in invalid state)
+- **SC-004a**: Failed operations leave zero trace - original document unchanged in memory and on disk, no temporary state visible to other operations
 - **SC-005**: Schema introspection returns fully resolved schema for any valid path in under 50ms
 - **SC-006**: System handles 100 concurrent operations on different documents without performance degradation
 - **SC-007**: Validation error messages enable users to fix issues without consulting external documentation (measured by: error message includes all necessary context - path, constraint, expected vs actual)
@@ -375,17 +570,22 @@ A client application wants to retrieve the complete JSON document for purposes s
 - Server is initialized with a single, valid JSON schema before accepting any document operations
 - All documents managed by a server instance conform to the same schema (single-schema architecture)
 - Users requiring multiple schemas will run multiple server instances
-- Doc_ids are managed by users (system doesn't auto-generate unless requested)
-- Local filesystem provides atomic write operations for MVP
+- Doc_ids are auto-generated using ULID format by document_create (not provided by users)
+- Local filesystem provides atomic rename operations for MVP write-then-rename strategy
 - Network latency between MCP client and server is reasonable (<100ms)
 - Configured JSON schema is valid per Draft 2020-12 specification
+- Schema $ref references can be resolved (no circular references or broken URIs)
 - Users understand JSON Pointer syntax or use tools that generate valid paths
+- Users understand that intermediate paths must exist (no auto-creation)
 - Concurrent operations on same document are relatively rare (optimistic locking acceptable)
 - Agent operations focus on path-based incremental editing, not bulk document retrieval
 - Client applications have mechanisms to handle complete document export separate from agent operations
 - Local file system has sufficient storage capacity for document storage (MVP)
 - File system permissions allow read/write operations in designated storage directory
+- Storage directory can handle flat structure efficiently (up to ~10k documents before sharding needed)
 - Schema changes are infrequent enough that server restarts are acceptable
+- MVP performance acceptable without in-memory caching (documents read from disk on every operation)
+- System is single-instance deployment (no distributed coordination required for MVP)
 
 ### Out of Scope
 
@@ -406,11 +606,56 @@ A client application wants to retrieve the complete JSON document for purposes s
 - Replication or high-availability clustering
 - Storage optimization (compression, deduplication)
 
+### Post-MVP Enhancements
+
+These features are deferred to future iterations after MVP validation. They represent optimizations and capabilities that can be added incrementally without breaking MVP functionality.
+
+#### Performance & Scalability
+
+- **In-memory document cache**: LRU cache for frequently accessed documents to reduce disk I/O. Considerations: cache size limits, eviction policy, memory pressure handling, cache coherency with file system. MVP reads from disk on every operation for simplicity.
+
+- **Document metadata indexing**: In-memory index of document metadata (created_at, modified_at, doc_id) for fast `document_list` queries. MVP performs directory scan on every list operation. Post-MVP can maintain sorted index for efficient pagination and filtering.
+
+- **Structural sharing for deep clone**: Instead of full document cloning, use immutable data structures with structural sharing to reduce memory footprint for large documents. MVP uses simple deep clone. Trade-off: complexity vs memory efficiency.
+
+- **Validation timeout and limits**: Circuit breaker for validation operations to prevent DoS with pathological schemas. Add configurable timeout (e.g., 30s), max schema depth (e.g., 1000 levels), max document depth. MVP assumes well-behaved schemas.
+
+#### Operations & Observability
+
+- **Structured logging**: JSON-formatted logs with correlation IDs, request tracing, performance metrics. MVP uses simple console logging. Post-MVP needs log aggregation, rotation, filtering.
+
+- **Health checks and metrics**: HTTP endpoints for liveness/readiness probes, Prometheus metrics for operation latency, error rates, document counts. Critical for production deployment.
+
+- **Crash recovery algorithm**: Sophisticated startup recovery that compares `.tmp` file timestamps with `.json` files to recover interrupted writes. MVP simply deletes all `.tmp` files on startup (conservative but safe).
+
+- **fsync() retry logic**: Exponential backoff retry on fsync failures, platform-specific error handling (Windows FlushFileBuffers vs POSIX fsync). MVP fails immediately on fsync error.
+
+#### API & Features
+
+- **Negative array indices**: Support Python-style negative indexing (`-1` = last element) as JSON Pointer extension. MVP strictly follows RFC 6901 (no negative indices).
+
+- **MCP resource URI verification**: Validate `schema://doc_id` format against official MCP protocol specification for resource URIs. MVP uses assumed format.
+
+- **JSON Schema format validators**: Document exhaustive list of supported `format` validators (email, uri, date-time, uuid, ipv4, ipv6, hostname, etc.) or reference validator library docs. MVP uses AJV defaults.
+
+- **schema_get_node simplification**: Consider removing `doc_id` parameter from `schema_get_node` tool since schema is server-level (all docs share same schema). Requires API redesign discussion.
+
+- **Batch operations**: Support for multi-document operations, bulk imports, batch validation. Improves efficiency for large-scale data migrations.
+
+#### Advanced Features
+
+- **Query and filtering**: JSONPath or GraphQL-style queries across multiple documents. Requires indexing infrastructure.
+
+- **Document size limits**: Explicit max document size constraint (e.g., 50MB) with clear error messages. Prevents OOM crashes with pathological documents.
+
+- **Real-time subscriptions**: WebSocket-based document change notifications for real-time collaboration. Significant architectural addition.
+
 ### Dependencies
 
 - JSON Schema validation library (e.g., AJV, Hyperjson, or similar) supporting Draft 2020-12
 - JSON Pointer implementation (RFC 6901 compliant)
 - MCP SDK/library for TypeScript
+- ULID generator library for TypeScript (e.g., `ulid` package)
 - Node.js filesystem APIs for local file-based storage (MVP)
 - TypeScript compiler with strict mode
 - JSON Schema to TypeScript type generator
@@ -434,7 +679,7 @@ This section defines the MCP tools with semantically meaningful names that refle
 
 ### Tool: document_create
 
-Creates a new empty document conforming to the server's configured schema and returns a unique doc_id. The document is initialized with minimal valid content (empty object or schema defaults). Agents then use other CRUD operations to populate the document tree incrementally.
+Creates a new empty document conforming to the server's configured schema and returns a unique doc_id. The document is initialized ONLY with fields that have explicit `default` values in the schema. If the schema has required fields without defaults, the operation fails with a clear error. Agents then use other CRUD operations to populate the document tree incrementally.
 
 **Input Schema**:
 ```json
@@ -467,13 +712,34 @@ Creates a new empty document conforming to the server's configured schema and re
     },
     "initial_tree": {
       "type": "object",
-      "description": "The minimal initial document tree structure (e.g., {} or schema defaults)"
-    }
-    "validationResult": {
+      "description": "The document tree structure initialized with schema defaults only"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Document version number, starts at 1, increments on every write operation"
+    },
+    "validation_report": {
       "type": "object",
+      "required": ["valid"],
       "properties": {
         "valid": { "type": "boolean" },
-        "errors": { "type": "array" }
+        "error_count": { "type": "integer", "description": "Total number of validation errors" },
+        "errors": { 
+          "type": "array",
+          "description": "Complete list of ALL validation errors. On creation failure, includes 'required-field-without-default' errors",
+          "items": {
+            "type": "object",
+            "required": ["code", "message", "path"],
+            "properties": {
+              "code": { "type": "string", "description": "Machine-readable error code (e.g., 'required-field-without-default', 'type-mismatch')" },
+              "message": { "type": "string", "description": "Human-readable error message explaining what's wrong and how to fix it" },
+              "path": { "type": "string", "description": "JSON Pointer to the exact location of the error" },
+              "constraint": { "type": "string", "description": "The schema constraint that was violated (e.g., 'required', 'type', 'minLength')" },
+              "expected": { "description": "The expected value or format according to schema" },
+              "actual": { "description": "The actual value provided that failed validation" }
+            }
+          }
+        }
       }
     }
   }
@@ -509,11 +775,15 @@ Retrieves content at a specified node (path) within the document tree.
 ```json
 {
   "type": "object",
-  "required": ["success", "node_content"],
+  "required": ["success", "node_content", "version"],
   "properties": {
     "success": { "type": "boolean" },
     "node_content": {
       "description": "Content at the specified tree node, type varies based on schema"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Current document version, use this in subsequent write operations for optimistic locking"
     },
     "node_type": {
       "type": "string",
@@ -584,7 +854,7 @@ Updates content at a specified node (path) in the document tree with validation.
 ```json
 {
   "type": "object",
-  "required": ["doc_id", "node_path", "node_data"],
+  "required": ["doc_id", "node_path", "node_data", "version"],
   "properties": {
     "doc_id": {
       "type": "string",
@@ -597,6 +867,10 @@ Updates content at a specified node (path) in the document tree with validation.
     },
     "node_data": {
       "description": "New data for the node, must conform to schema for that location"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Expected document version from previous read, operation fails if version has changed (optimistic locking)"
     }
   }
 }
@@ -612,11 +886,32 @@ Updates content at a specified node (path) in the document tree with validation.
     "updated_node": {
       "description": "The updated content at the node"
     },
-    "validationResult": {
+    "version": {
+      "type": "integer",
+      "description": "New document version after successful update (incremented from input version)"
+    },
+    "validation_report": {
       "type": "object",
+      "required": ["valid"],
       "properties": {
         "valid": { "type": "boolean" },
-        "errors": { "type": "array" }
+        "error_count": { "type": "integer" },
+        "errors": { 
+          "type": "array",
+          "description": "Complete list of ALL validation errors",
+          "items": {
+            "type": "object",
+            "required": ["code", "message", "path"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "path": { "type": "string" },
+              "constraint": { "type": "string" },
+              "expected": {},
+              "actual": {}
+            }
+          }
+        }
       }
     }
   }
@@ -633,7 +928,7 @@ Creates new content at a specified node (path) in the document tree.
 ```json
 {
   "type": "object",
-  "required": ["doc_id", "node_path", "node_data"],
+  "required": ["doc_id", "node_path", "node_data", "version"],
   "properties": {
     "doc_id": {
       "type": "string",
@@ -646,6 +941,10 @@ Creates new content at a specified node (path) in the document tree.
     },
     "node_data": {
       "description": "New data to create at the node, must conform to schema"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Expected document version from previous read, operation fails if version has changed (optimistic locking)"
     }
   }
 }
@@ -665,11 +964,32 @@ Creates new content at a specified node (path) in the document tree.
     "created_node": {
       "description": "The created node content"
     },
-    "validationResult": {
+    "version": {
+      "type": "integer",
+      "description": "New document version after successful create operation (incremented from input version)"
+    },
+    "validation_report": {
       "type": "object",
+      "required": ["valid"],
       "properties": {
         "valid": { "type": "boolean" },
-        "errors": { "type": "array" }
+        "error_count": { "type": "integer" },
+        "errors": { 
+          "type": "array",
+          "description": "Complete list of ALL validation errors",
+          "items": {
+            "type": "object",
+            "required": ["code", "message", "path"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "path": { "type": "string" },
+              "constraint": { "type": "string" },
+              "expected": {},
+              "actual": {}
+            }
+          }
+        }
       }
     }
   }
@@ -686,7 +1006,7 @@ Deletes content at a specified node (path) in the document tree.
 ```json
 {
   "type": "object",
-  "required": ["doc_id", "node_path"],
+  "required": ["doc_id", "node_path", "version"],
   "properties": {
     "doc_id": {
       "type": "string",
@@ -696,6 +1016,10 @@ Deletes content at a specified node (path) in the document tree.
       "type": "string",
       "pattern": "^/",
       "description": "JSON Pointer path to the node in the document tree (RFC 6901)"
+    },
+    "version": {
+      "type": "integer",
+      "description": "Expected document version from previous read, operation fails if version has changed (optimistic locking)"
     }
   }
 }
@@ -711,11 +1035,32 @@ Deletes content at a specified node (path) in the document tree.
     "deleted_node": {
       "description": "The node content that was deleted from the tree"
     },
-    "validationResult": {
+    "version": {
+      "type": "integer",
+      "description": "New document version after successful delete operation (incremented from input version)"
+    },
+    "validation_report": {
       "type": "object",
+      "required": ["valid"],
       "properties": {
         "valid": { "type": "boolean" },
-        "errors": { "type": "array" }
+        "error_count": { "type": "integer" },
+        "errors": { 
+          "type": "array",
+          "description": "Complete list of ALL validation errors (e.g., if deletion violates schema)",
+          "items": {
+            "type": "object",
+            "required": ["code", "message", "path"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "path": { "type": "string" },
+              "constraint": { "type": "string" },
+              "expected": {},
+              "actual": {}
+            }
+          }
+        }
       }
     }
   }
@@ -850,7 +1195,170 @@ The MCP tools use semantically meaningful names that reflect the document-centri
 - **Schema** - Highlights schema-driven validation and type safety
 - **Root** - Indicates the top-level schema or document structure
 
-These conventions ensure that tool names and parameters clearly communicate the system's purpose: managing complete documents with granular tree-based operations.
+**Validation Error Reporting:**
+- `validation_report` - Complete validation result with all errors
+- `error_count` - Total number of validation errors found
+- `code` - Machine-readable error code (e.g., 'type-mismatch', 'required-missing', 'required-field-without-default')
+- `message` - Human-readable actionable error message
+- `constraint` - The specific schema constraint violated
+- `expected` - What the schema requires
+- `actual` - What was provided
+
+**Standard Error Codes:**
+
+The system defines an exhaustive, versioned enumeration of ALL possible error codes. Each code includes machine-readable identifier, category, description, typical causes, and remediation.
+
+**Client Errors (4xx category):**
+
+- **`invalid-doc-id`** (400) - doc_id format is invalid or malformed
+  - Causes: doc_id contains invalid characters, wrong length, or doesn't match ULID format
+  - Remediation: Use only doc_id values returned by document_create; verify doc_id format matches ULID specification
+
+- **`document-not-found`** (404) - Specified doc_id doesn't exist in storage
+  - Causes: doc_id never created, or document was deleted
+  - Remediation: Verify doc_id is correct; use document_list to see available documents; create new document with document_create
+
+- **`path-not-found`** (404) - JSON Pointer path doesn't exist in document structure
+  - Causes: Path references non-existent property or array index; intermediate paths missing
+  - Remediation: Use document_read_node on parent path to verify structure; create missing intermediate paths explicitly; check for typos in path
+
+- **`path-invalid`** (400) - JSON Pointer syntax is malformed
+  - Causes: Path doesn't start with `/`; contains unescaped special characters; invalid array index
+  - Remediation: Follow RFC 6901 JSON Pointer syntax; use `/` for root; escape `~` and `/` characters; use numeric array indices
+
+- **`conflict`** (409) - Resource already exists at target path
+  - Causes: Attempting document_create_node on path that already has content
+  - Remediation: Use document_update_node to modify existing content; use document_read_node to check if path exists; delete existing content first if replacement intended
+
+- **`version-conflict`** (409) - Document version has changed since read (optimistic locking conflict)
+  - Causes: Another operation modified document between your read and write operations
+  - Remediation: Re-read document with document_read_node to get current version and content; reapply your changes; retry write with new version
+
+- **`lock-timeout`** (408) - Failed to acquire document lock within 10 seconds
+  - Causes: Another write operation is taking too long; deadlock condition; system overload
+  - Remediation: Retry operation after brief delay; check for long-running operations; investigate system performance
+
+**Validation Errors (422 category):**
+
+- **`required-field-without-default`** (422) - Schema has required field with no default value (document_create only)
+  - Causes: JSON Schema defines required fields but doesn't provide default values for them
+  - Remediation: Add default values to schema for all required fields; or change fields to optional; or provide initial values via document_update_node after creation
+
+- **`type-mismatch`** (422) - Value type doesn't match schema type constraint
+  - Causes: Providing string where number expected; object where array expected; etc.
+  - Remediation: Check schema with schema_get_node; convert value to expected type; verify data structure matches schema definition
+
+- **`required-missing`** (422) - Required field is missing from provided data
+  - Causes: Update/create operation omits field marked as required in schema
+  - Remediation: Include all required fields in operation; check schema with schema_get_node for required fields list; provide values for all required fields
+
+- **`min-length`** / **`max-length`** (422) - String length constraint violated
+  - Causes: String too short (below minLength) or too long (above maxLength)
+  - Remediation: Check schema constraints; adjust string length to meet requirements; verify minLength/maxLength values in schema
+
+- **`pattern-failed`** (422) - String doesn't match required regex pattern
+  - Causes: String format incorrect according to schema pattern constraint
+  - Remediation: Check schema pattern with schema_get_node; format string to match regex; verify pattern requirements
+
+- **`enum-mismatch`** (422) - Value not in allowed enum values list
+  - Causes: Provided value not one of the enumerated options in schema
+  - Remediation: Check schema enum with schema_get_node; use exact value from enum list (case-sensitive); verify spelling
+
+- **`min-items`** / **`max-items`** (422) - Array size constraint violated
+  - Causes: Array has too few items (below minItems) or too many items (above maxItems)
+  - Remediation: Check schema array constraints; adjust array size to meet requirements
+
+- **`minimum`** / **`maximum`** (422) - Numeric value constraint violated
+  - Causes: Number below minimum or above maximum allowed value
+  - Remediation: Check schema numeric constraints; adjust value to valid range
+
+- **`format-invalid`** (422) - String doesn't match required format (email, uri, date-time, etc.)
+  - Causes: String format incorrect according to schema format specification
+  - Remediation: Check schema format with schema_get_node; format string according to specification (ISO 8601 for dates, RFC 5321 for email, etc.)
+
+- **`additional-properties-forbidden`** (422) - Object contains properties not defined in schema when additionalProperties: false
+  - Causes: Providing extra fields not in schema when schema forbids additional properties
+  - Remediation: Remove extra properties; check schema with schema_get_node for allowed properties; verify property names match schema exactly
+
+**Server Errors (5xx category):**
+
+- **`schema-load-failed`** (500) - Failed to load or parse JSON schema at server startup
+  - Causes: Schema file not found; schema file contains invalid JSON; schema violates JSON Schema meta-schema
+  - Remediation: Verify schema file path in configuration; validate schema file is well-formed JSON; validate schema against JSON Schema Draft 2020-12 meta-schema
+
+- **`schema-resolution-failed`** (500) - Failed to resolve $ref references in schema
+  - Causes: Circular $ref references; unresolvable $ref URIs; missing referenced schema definitions
+  - Remediation: Check for circular references in schema; verify all $ref URIs resolve correctly; ensure referenced schemas are accessible
+
+- **`storage-read-failed`** (500) - Failed to read document from storage
+  - Causes: File system permissions; disk I/O error; corrupted document file
+  - Remediation: Check file system permissions; verify disk health; check storage directory is readable; restore from backup if corrupted
+
+- **`storage-write-failed`** (500) - Failed to write document to storage
+  - Causes: Disk full; file system permissions; disk I/O error
+  - Remediation: Check disk space; verify write permissions on storage directory; check disk health
+
+- **`internal-error`** (500) - Unexpected internal server error
+  - Causes: Unhandled exception; programming bug; system resource exhaustion
+  - Remediation: Check server logs for details; report bug with reproduction steps; restart server if transient issue
+
+**Error Response Format:**
+
+All errors return structured format:
+```json
+{
+  "error": {
+    "code": "version-conflict",
+    "category": "409",
+    "message": "Document version has changed since read",
+    "details": {
+      "doc_id": "01JDEX3M8K2N9WPQR5STV6XY7Z",
+      "expected_version": 5,
+      "actual_version": 7,
+      "path": "/metadata/title"
+    },
+    "remediation": "Re-read document to get current version, then retry operation"
+  }
+}
+```
+
+For validation errors with multiple violations, `details.violations` contains array of all errors:
+```json
+{
+  "error": {
+    "code": "validation-failed",
+    "category": "422",
+    "message": "Document validation failed with 3 errors",
+    "details": {
+      "violations": [
+        {
+          "code": "type-mismatch",
+          "message": "Expected number, got string",
+          "path": "/metadata/pageCount",
+          "expected": "number",
+          "actual": "string",
+          "value": "not a number"
+        },
+        {
+          "code": "required-missing",
+          "message": "Required field 'author' is missing",
+          "path": "/metadata",
+          "required_fields": ["author"]
+        },
+        {
+          "code": "pattern-failed",
+          "message": "String doesn't match required pattern",
+          "path": "/metadata/isbn",
+          "pattern": "^[0-9]{13}$",
+          "value": "invalid-isbn"
+        }
+      ]
+    }
+  }
+}
+```
+
+These conventions ensure that tool names and parameters clearly communicate the system's purpose: managing complete documents with granular tree-based operations and comprehensive validation feedback.
 
 ---
 
