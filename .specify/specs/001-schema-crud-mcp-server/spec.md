@@ -443,89 +443,109 @@ All mutating operations (update, create, delete) follow this mandatory workflow 
 
 #### Concurrency Control
 
-- **FR-075**: System MUST implement optimistic locking using document version identifiers (integer counter or etag)
-- **FR-075a**: System MUST initialize new documents with version counter starting at 1 (version 0 never exists)
-- **FR-076**: System MUST increment document version on every successful write operation (update, create node, delete node)
-- **FR-077**: System MUST return current document version in all read operations (document_read_node output)
-- **FR-078**: System MUST require version parameter in all write operation inputs (document_update_node, document_create_node, document_delete_node)
-- **FR-079**: System MUST validate version parameter matches current document version before applying write operation
-- **FR-080**: System MUST fail write operations with error code `version-conflict` if document version has changed since client's read
-- **FR-081**: Read operations (document_read_node, schema_get_node) MUST NOT block or be blocked by write operations
-- **FR-082**: System MUST use document-level lock timeout of 10 seconds (hardcoded, not configurable)
-- **FR-082a**: System MUST implement document locks using in-memory mutex/lock map keyed by doc_id
-- **FR-082b**: Write operations MUST acquire exclusive lock on doc_id before cloning document (blocking operation with timeout)
-- **FR-082c**: System MUST release lock immediately after successful write (after atomic rename) or on operation failure
-- **FR-082d**: System MUST fail write operation with error code `lock-timeout` if lock cannot be acquired within 10 seconds
-- **FR-082e**: System MUST implement lock cleanup on abnormal termination (e.g., process crash) by releasing all locks on server restart
-- **FR-083**: System MUST serialize write operations to the same document (only one write at a time per document)
-- **FR-084**: System MUST allow concurrent read operations on the same document
-- **FR-085**: System MUST allow concurrent operations on different documents without interference
+- **FR-076**: System MUST implement optimistic locking using document version identifiers (integer counter or etag)
+- **FR-076a**: System MUST initialize new documents with version counter starting at 1 (version 0 never exists)
+- **FR-077**: System MUST increment document version on every successful write operation (update, create node, delete node)
+- **FR-078**: System MUST return current document version in all read operations (document_read_node output)
+- **FR-079**: System MUST require version parameter in all write operation inputs (document_update_node, document_create_node, document_delete_node)
+- **FR-080**: System MUST validate version parameter matches current document version before applying write operation
+- **FR-081**: System MUST fail write operations with error code `version-conflict` if document version has changed since client's read
+- **FR-082**: Read operations (document_read_node, schema_get_node) MUST NOT block or be blocked by write operations
+- **FR-083**: System MUST use document-level lock timeout of 10 seconds (hardcoded, not configurable)
+- **FR-083a**: System MUST implement document locks using in-memory mutex/lock map keyed by doc_id
+- **FR-083b**: Write operations MUST acquire exclusive lock on doc_id before cloning document (blocking operation with timeout)
+- **FR-083c**: System MUST release lock immediately after successful write (after atomic rename) or on operation failure
+- **FR-083d**: System MUST fail write operation with error code `lock-timeout` if lock cannot be acquired within 10 seconds
+- **FR-083e**: System MUST implement lock cleanup on abnormal termination (e.g., process crash) by releasing all locks on server restart
+- **FR-084**: System MUST serialize write operations to the same document (only one write at a time per document)
+- **FR-085**: System MUST allow concurrent read operations on the same document
+- **FR-086**: System MUST allow concurrent operations on different documents without interference
 
 #### Schema Resolution & Defaults
 
-- **FR-086**: System MUST recursively resolve ALL $ref references during schema loading at server startup
-- **FR-087**: System MUST merge default values from referenced schemas into the resolved schema tree
-- **FR-088**: When initializing documents, system MUST collect defaults from the entire resolved schema tree (including $ref targets)
-- **FR-089**: System MUST apply defaults consistently regardless of whether schema uses inline definitions or $ref composition
-- **FR-090**: System MUST fail with clear error if $ref resolution encounters circular references or unresolvable references
+- **FR-087**: System MUST recursively resolve ALL $ref references during schema loading at server startup
+- **FR-088**: System MUST merge default values from referenced schemas into the resolved schema tree
+- **FR-089**: When initializing documents, system MUST collect defaults from the entire resolved schema tree (including $ref targets)
+- **FR-090**: System MUST apply defaults consistently regardless of whether schema uses inline definitions or $ref composition
+- **FR-091**: System MUST fail with clear error if $ref resolution encounters circular references or unresolvable references
 
 #### Path Operations & Validation
 
-- **FR-091**: System MUST NOT auto-create intermediate paths for nested operations
-- **FR-092**: When path operation targets non-existent intermediate path (e.g., `/a/b/c` when `/a/b` doesn't exist), system MUST fail with error code `path-not-found`
-- **FR-093**: Path error responses MUST include: requested path, deepest existing ancestor path, and guidance on which path to create first
-- **FR-094**: System MUST require explicit path creation to make document evolution intentional and prevent accidental structure creation
+- **FR-092**: System MUST NOT auto-create intermediate paths for nested operations
+- **FR-093**: When path operation targets non-existent intermediate path (e.g., `/a/b/c` when `/a/b` doesn't exist), system MUST fail with error code `path-not-found`
+- **FR-094**: Path error responses MUST include: requested path, deepest existing ancestor path, and guidance on which path to create first
+- **FR-095**: System MUST require explicit path creation to make document evolution intentional and prevent accidental structure creation
 
 #### Error Code Specification
 
-- **FR-095**: System MUST define exhaustive enumeration of ALL possible error codes as versioned API contract
-- **FR-096**: Each error code MUST include: machine-readable identifier (kebab-case string), HTTP-style category (4xx client/5xx server), description, typical causes, and remediation guidance
-- **FR-097**: System MUST maintain error code stability across minor versions (no breaking changes to existing codes)
-- **FR-098**: System MUST document all error codes in API specification with examples
-- **FR-099**: New error codes MAY be added in minor versions; existing codes MUST NOT change meaning
+- **FR-096**: System MUST define exhaustive enumeration of ALL possible error codes as versioned API contract
+- **FR-097**: Each error code MUST include: machine-readable identifier (kebab-case string), HTTP-style category (4xx client/5xx server), description, typical causes, and remediation guidance
+- **FR-098**: System MUST maintain error code stability across minor versions (no breaking changes to existing codes)
+- **FR-099**: System MUST document all error codes in API specification with examples
+- **FR-100**: New error codes MAY be added in minor versions; existing codes MUST NOT change meaning
 
 #### Storage Directory Structure
 
-- **FR-100**: System MUST use flat directory structure with all documents in single configured directory
-- **FR-101**: System MUST store documents with filename pattern `{doc_id}.json` (e.g., `01JDEX3M8K2N9WPQR5STV6XY7Z.json`)
-- **FR-102**: System MUST use `.tmp` suffix for temporary files during write operations (e.g., `{doc_id}.tmp`)
-- **FR-103**: System MUST configure storage directory path at server startup (e.g., `./data/` or absolute path)
-- **FR-104**: System MUST create storage directory if it doesn't exist at startup
-- **FR-105**: System MUST validate storage directory is writable at startup and fail fast if not
-- **FR-106**: Future optimization MAY introduce sharding subdirectories (e.g., first 2 chars of doc_id) when document count exceeds 10,000
+- **FR-101**: System MUST use flat directory structure with all documents in single configured directory
+- **FR-102**: System MUST store documents with filename pattern `{doc_id}.json` (e.g., `01JDEX3M8K2N9WPQR5STV6XY7Z.json`)
+- **FR-103**: System MUST use `.tmp` suffix for temporary files during write operations (e.g., `{doc_id}.tmp`)
+- **FR-104**: System MUST configure storage directory path at server startup (e.g., `./data/` or absolute path)
+- **FR-105**: System MUST create storage directory if it doesn't exist at startup
+- **FR-106**: System MUST validate storage directory is writable at startup and fail fast if not
+- **FR-107**: Future optimization MAY introduce sharding subdirectories (e.g., first 2 chars of doc_id) when document count exceeds 10,000
 
 #### Document ID Generation
 
-- **FR-107**: System MUST use ULID (Universally Unique Lexicographically Sortable Identifier) format for auto-generated doc_id values
-- **FR-108**: Generated doc_ids MUST be: 26-character case-insensitive encoding, timestamp-ordered (sortable by creation time), 128-bit random component for collision resistance
-- **FR-109**: Generated doc_ids MUST be filesystem-safe (no special characters requiring escaping)
-- **FR-110**: System MUST use standard ULID library for generation (not custom implementation)
-- **FR-111**: Example valid doc_id: `01JDEX3M8K2N9WPQR5STV6XY7Z`
+- **FR-108**: System MUST use ULID (Universally Unique Lexicographically Sortable Identifier) format for auto-generated doc_id values
+- **FR-109**: Generated doc_ids MUST be: 26-character case-insensitive encoding, timestamp-ordered (sortable by creation time), 128-bit random component for collision resistance
+- **FR-110**: Generated doc_ids MUST be filesystem-safe (no special characters requiring escaping)
+- **FR-111**: System MUST use standard ULID library for generation (not custom implementation)
+- **FR-112**: Example valid doc_id: `01JDEX3M8K2N9WPQR5STV6XY7Z`
 
 #### Transaction Boundaries
 
-- **FR-112**: System MUST implement document-level atomic transactions (each document operation is an atomic unit)
-- **FR-113**: System MUST NOT support cross-document transactions (no multi-document atomicity)
-- **FR-114**: Write transaction workflow MUST follow: (1) Clone document in-memory, (2) Apply modification to clone, (3) Validate entire clone, (4) Write to `{doc_id}.tmp`, (5) fsync() for durability, (6) Atomic rename to `{doc_id}.json`
-- **FR-115**: System MUST guarantee consistency at individual document level only
-- **FR-116**: System MUST ensure each document operation either fully succeeds or fully fails (no partial modifications visible)
+- **FR-113**: System MUST implement document-level atomic transactions (each document operation is an atomic unit)
+- **FR-114**: System MUST NOT support cross-document transactions (no multi-document atomicity)
+- **FR-115**: Write transaction workflow MUST follow: (1) Clone document in-memory, (2) Apply modification to clone, (3) Validate entire clone, (4) Write to `{doc_id}.tmp`, (5) fsync() for durability, (6) Atomic rename to `{doc_id}.json`
+- **FR-116**: System MUST guarantee consistency at individual document level only
+- **FR-117**: System MUST ensure each document operation either fully succeeds or fully fails (no partial modifications visible)
+
+#### Dual Interface Architecture
+
+- **FR-065**: System MUST provide TWO entry points: (1) MCP protocol server for agent/AI integrations, (2) OpenAPI REST API for traditional HTTP clients
+- **FR-065a**: Both interfaces MUST expose identical functionality (all 8 operations available through both protocols)
+- **FR-065b**: MCP server MUST run on stdio transport for agent integration
+- **FR-065c**: REST API MUST run on HTTP with configurable port (default 8080)
+- **FR-065d**: System MUST support running both interfaces simultaneously OR independently based on configuration
 
 #### MCP Protocol Integration
 
-- **FR-065**: System MUST expose all operations as MCP tools with JSON Schema input definitions
-- **FR-066**: System MUST return results conforming to MCP response format
-- **FR-067**: System MUST map errors to MCP error response structure with full validation reports
-- **FR-068**: System MUST support MCP resource URIs for document access (e.g., `schema://doc_id` for full document export)
-- **FR-068**: Each MCP tool MUST declare its input schema including doc_id and path parameters
-- **FR-069**: Each MCP tool MUST declare its output schema for type-safe responses
+- **FR-066**: System MUST expose all operations as MCP tools with JSON Schema input definitions
+- **FR-067**: System MUST return results conforming to MCP response format
+- **FR-068**: System MUST map errors to MCP error response structure with full validation reports
+- **FR-069**: System MUST support MCP resource URIs for document access (e.g., `schema://doc_id` for full document export)
+- **FR-069a**: Each MCP tool MUST declare its input schema including doc_id and path parameters
+- **FR-069b**: Each MCP tool MUST declare its output schema for type-safe responses
+
+#### REST API Integration
+
+- **FR-070a**: System MUST provide OpenAPI 3.1 specification describing all REST endpoints
+- **FR-070b**: System MUST serve Swagger UI at `/docs` endpoint for interactive API exploration
+- **FR-070c**: System MUST serve ReDoc documentation at `/redoc` endpoint
+- **FR-070d**: System MUST provide OpenAPI spec JSON at `/openapi.json` endpoint
+- **FR-070e**: REST endpoints MUST map 1:1 to MCP tools with equivalent functionality
+- **FR-070f**: REST API MUST use standard HTTP methods: POST for writes (create/update/delete), GET for reads
+- **FR-070g**: REST API MUST return JSON responses with same structure as MCP tool outputs
+- **FR-070h**: REST API MUST use standard HTTP status codes: 200 OK, 201 Created, 400 Bad Request, 404 Not Found, 409 Conflict, 422 Validation Error, 500 Internal Server Error
+- **FR-070i**: REST API MUST support CORS for browser-based clients (configurable origins)
 
 #### Type Safety
 
-- **FR-070**: System MUST use TypeScript for implementation with strict type checking enabled
-- **FR-071**: System MUST generate TypeScript types from JSON schemas for all data structures
-- **FR-072**: System MUST validate TypeScript types match runtime JSON schema validation
-- **FR-073**: System MUST prevent use of `any` type except where explicitly justified with mitigation
-- **FR-074**: System MUST use type guards at all system boundaries
+- **FR-071**: System MUST use Python 3.11+ for implementation with type hints and MyPy strict type checking enabled
+- **FR-072**: System MUST define types (dataclasses, TypedDicts, Pydantic models) for all data structures from JSON schemas
+- **FR-073**: System MUST validate Python types match runtime JSON schema validation
+- **FR-074**: System MUST prevent use of `Any` type except where explicitly justified with mitigation
+- **FR-075**: System MUST use type narrowing and isinstance() checks at all system boundaries
 
 ### Key Entities
 
@@ -652,26 +672,29 @@ These features are deferred to future iterations after MVP validation. They repr
 
 ### Dependencies
 
-- JSON Schema validation library (e.g., AJV, Hyperjson, or similar) supporting Draft 2020-12
-- JSON Pointer implementation (RFC 6901 compliant)
-- MCP SDK/library for TypeScript
-- ULID generator library for TypeScript (e.g., `ulid` package)
-- Node.js filesystem APIs for local file-based storage (MVP)
-- TypeScript compiler with strict mode
-- JSON Schema to TypeScript type generator
+- JSON Schema validation library supporting Draft 2020-12 (e.g., `jsonschema` for Python)
+- JSON Pointer implementation (RFC 6901 compliant) - built into `jsonschema` library
+- MCP Python SDK (`mcp` package)
+- FastAPI framework for REST API implementation
+- Uvicorn ASGI server for serving REST API
+- ULID generator library for Python (e.g., `python-ulid` package)
+- Python 3.11+ with async/await support
+- Pydantic for configuration and data validation
+- MyPy for static type checking
 
 ### Constraints
 
 - Must conform to all principles in project constitution (schema-first, type safety, validation at boundaries, etc.)
-- Must use TypeScript with strict type checking
+- Must use Python 3.11+ with MyPy strict type checking
 - Must validate all data against schemas at every boundary
 - Must follow TDD approach (tests written and approved before implementation)
-- Must use MCP protocol exclusively for external interface (no REST/GraphQL/other APIs)
+- Must provide BOTH MCP and REST interfaces with identical functionality
 - Must handle documents as complete units (no partial document loading except via path operations)
 - Must support schemas up to reasonable complexity (depth limits, reference limits to prevent DoS)
 - Performance target: sub-second response for documents up to 10MB
 - Storage implementation must use abstraction layer to enable future migration to cloud NoSQL
 - MVP uses local file-based storage; production may require cloud storage migration
+- REST API must be independently usable without MCP client (Swagger UI for testing)
 
 ## MCP Tools Specification
 
@@ -1362,23 +1385,338 @@ These conventions ensure that tool names and parameters clearly communicate the 
 
 ---
 
+## REST API Endpoints
+
+The REST API provides HTTP/JSON access to all document operations with identical functionality to MCP tools. All endpoints are documented in OpenAPI 3.1 specification served at `/openapi.json`, with interactive documentation at `/docs` (Swagger UI) and `/redoc` (ReDoc).
+
+### Base URL
+
+```
+http://localhost:8080/api/v1
+```
+
+### Endpoint Summary
+
+| Method | Endpoint | Description | MCP Tool Equivalent |
+|--------|----------|-------------|---------------------|
+| POST | `/documents` | Create new document | `document_create` |
+| GET | `/documents/{doc_id}` | Read document node | `document_read_node` |
+| PUT | `/documents/{doc_id}` | Update document node | `document_update_node` |
+| POST | `/documents/{doc_id}/nodes` | Create node | `document_create_node` |
+| DELETE | `/documents/{doc_id}/nodes` | Delete node | `document_delete_node` |
+| GET | `/documents` | List all documents | `document_list` |
+| GET | `/schema` | Get root schema | `schema_get_root` |
+| GET | `/schema/node` | Get schema for path | `schema_get_node` |
+
+### POST /documents - Create Document
+
+Creates a new document with schema defaults.
+
+**Request:**
+```json
+{}  // No body required
+```
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "doc_id": "01JDEX3M8K2N9WPQR5STV6XY7Z",
+  "version": 1,
+  "document_uri": "http://localhost:8080/api/v1/documents/01JDEX3M8K2N9WPQR5STV6XY7Z",
+  "schema_uri": "file:///path/to/schema.json",
+  "initial_tree": { /* schema defaults */ },
+  "validation_report": { "valid": true, "error_count": 0, "errors": [] }
+}
+```
+
+---
+
+### GET /documents/{doc_id} - Read Document Node
+
+Retrieves content at specified path.
+
+**Query Parameters:**
+- `path` (required): JSON Pointer path (e.g., `/metadata/title`)
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "node_content": "My Book Title",
+  "version": 5,
+  "node_type": "string"
+}
+```
+
+**Error Response (404 Not Found):**
+```json
+{
+  "error": {
+    "code": "path-not-found",
+    "category": "404",
+    "message": "Path not found: /metadata/nonexistent",
+    "details": {
+      "path": "/metadata/nonexistent",
+      "deepest_ancestor": "/metadata"
+    },
+    "remediation": "Use GET /documents/{doc_id}?path=/metadata to verify structure"
+  }
+}
+```
+
+---
+
+### PUT /documents/{doc_id} - Update Document Node
+
+Updates content at specified path with validation.
+
+**Query Parameters:**
+- `path` (required): JSON Pointer path
+
+**Request Body:**
+```json
+{
+  "node_data": "Updated Title",
+  "version": 5
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "updated_node": "Updated Title",
+  "version": 6,
+  "validation_report": { "valid": true, "error_count": 0, "errors": [] }
+}
+```
+
+**Error Response (409 Conflict - Version Conflict):**
+```json
+{
+  "error": {
+    "code": "version-conflict",
+    "category": "409",
+    "message": "Document version has changed since read",
+    "details": {
+      "doc_id": "01JDEX3M8K2N9WPQR5STV6XY7Z",
+      "expected_version": 5,
+      "actual_version": 7
+    },
+    "remediation": "Re-read document to get current version, then retry operation"
+  }
+}
+```
+
+**Error Response (422 Unprocessable Entity - Validation Failed):**
+```json
+{
+  "error": {
+    "code": "validation-failed",
+    "category": "422",
+    "message": "Document validation failed with 2 errors",
+    "details": {
+      "violations": [
+        {
+          "code": "type-mismatch",
+          "message": "Expected string, got number",
+          "path": "/metadata/title",
+          "constraint": "type",
+          "expected": "string",
+          "actual": 123
+        }
+      ]
+    },
+    "remediation": "Fix all validation errors listed in violations array"
+  }
+}
+```
+
+---
+
+### POST /documents/{doc_id}/nodes - Create Node
+
+Creates new content at specified path.
+
+**Query Parameters:**
+- `path` (required): JSON Pointer path (use `/-` for array append)
+
+**Request Body:**
+```json
+{
+  "node_data": { "title": "New Chapter", "content": "..." },
+  "version": 5
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "success": true,
+  "created_node_path": "/chapters/3",
+  "created_node": { "title": "New Chapter", "content": "..." },
+  "version": 6,
+  "validation_report": { "valid": true, "error_count": 0, "errors": [] }
+}
+```
+
+---
+
+### DELETE /documents/{doc_id}/nodes - Delete Node
+
+Deletes content at specified path.
+
+**Query Parameters:**
+- `path` (required): JSON Pointer path
+
+**Request Body:**
+```json
+{
+  "version": 5
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "deleted_node": { "title": "Deleted Chapter", "content": "..." },
+  "version": 6,
+  "validation_report": { "valid": true, "error_count": 0, "errors": [] }
+}
+```
+
+---
+
+### GET /documents - List Documents
+
+Lists all documents with pagination.
+
+**Query Parameters:**
+- `limit` (optional, default=100): Maximum results
+- `offset` (optional, default=0): Offset for pagination
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "schema_uri": "file:///path/to/schema.json",
+  "documents": [
+    {
+      "doc_id": "01JDEX3M8K2N9WPQR5STV6XY7Z",
+      "created_at": "2025-11-29T10:00:00Z",
+      "modified_at": "2025-11-29T11:30:00Z",
+      "tree_size_bytes": 45623
+    }
+  ],
+  "total_documents": 42,
+  "has_more": true
+}
+```
+
+---
+
+### GET /schema - Get Root Schema
+
+Returns the server's configured root schema.
+
+**Query Parameters:**
+- `dereferenced` (optional, default=true): Whether to resolve $ref
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "schema_uri": "file:///path/to/schema.json",
+  "root_schema": { /* JSON Schema */ },
+  "schema_version": "1.0.0"
+}
+```
+
+---
+
+### GET /schema/node - Get Schema for Path
+
+Returns schema definition for specific path.
+
+**Query Parameters:**
+- `doc_id` (required): Document identifier
+- `path` (required): JSON Pointer path
+- `dereferenced` (optional, default=true): Whether to resolve $ref
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "node_schema": {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 200
+  },
+  "node_exists": true
+}
+```
+
+---
+
+### Health & Documentation Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check (returns `{"status": "healthy"}`) |
+| GET | `/docs` | Swagger UI interactive documentation |
+| GET | `/redoc` | ReDoc API documentation |
+| GET | `/openapi.json` | OpenAPI 3.1 specification |
+
+---
+
+### HTTP Status Code Mapping
+
+| Status | Usage |
+|--------|-------|
+| 200 OK | Successful read/update/delete |
+| 201 Created | Successful document/node creation |
+| 400 Bad Request | Invalid request format, invalid JSON Pointer |
+| 404 Not Found | Document not found, path not found |
+| 408 Request Timeout | Lock acquisition timeout |
+| 409 Conflict | Version conflict, resource already exists |
+| 422 Unprocessable Entity | Validation failed |
+| 500 Internal Server Error | Server errors (schema load, storage failure) |
+
+---
+
+### CORS Configuration
+
+REST API supports CORS for browser-based clients:
+
+```python
+# Configurable via environment variables
+CORS_ORIGINS=["http://localhost:3000", "https://app.example.com"]
+CORS_ALLOW_CREDENTIALS=true
+CORS_ALLOW_METHODS=["GET", "POST", "PUT", "DELETE"]
+CORS_ALLOW_HEADERS=["*"]
+```
+
+---
+
 ## Constitutional Compliance
 
 This specification adheres to the project constitution:
 
-- **Schema-First Design**: All operations defined by JSON schemas; MCP tool input/output schemas specified; Server initialized with single schema
-- **Type Safety**: All data structures defined with strict types; TypeScript implementation required
-- **CRUD Operations as Primitives**: Eight atomic operations defined with clear input/output contracts
-- **Validation at Boundaries**: Explicit validation requirements at every operation boundary
+- **Schema-First Design**: All operations defined by JSON schemas; MCP tool and REST endpoint schemas specified; Server initialized with single schema
+- **Type Safety**: All data structures defined with strict types; Python implementation required with type hints
+- **CRUD Operations as Primitives**: Eight atomic operations defined with clear input/output contracts, accessible via both MCP and REST
+- **Validation at Boundaries**: Explicit validation requirements at every operation boundary (both interfaces)
 - **Test-First**: Acceptance scenarios provided for every user story; ready for test implementation
-- **MCP Protocol Compliance**: All operations exposed as MCP tools with proper schema definitions
-- **Composability**: Each tool has single responsibility; operations can be chained
+- **Dual Protocol Compliance**: All operations exposed as MCP tools AND REST endpoints with identical functionality
+- **Composability**: Each tool/endpoint has single responsibility; operations can be chained
 
 ## Next Steps
 
 1. Review this specification for completeness and clarity
 2. Create quality checklist to validate spec meets all requirements
-3. If approved, proceed to `/speckit.plan` to create technical implementation plan
-4. Write tests based on acceptance scenarios before implementation
-5. Generate TypeScript types from all JSON schemas
-6. Implement MCP server following TDD approach
+3. If approved, proceed to implementation planning for dual-interface architecture
+4. Write tests based on acceptance scenarios before implementation (test both MCP and REST interfaces)
+5. Generate Pydantic models from all JSON schemas for type safety across both interfaces
+6. Implement MCP server and REST API following TDD approach with shared business logic layer
