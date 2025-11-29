@@ -3,7 +3,21 @@
 
 **Feature Branch**: `001-schema-crud-mcp-server`  
 **Created**: 2025-11-29  
+**Updated**: 2025-11-29 (Monorepo Structure)  
 **Status**: Ready for Implementation
+
+---
+
+## Directory Structure Note
+
+**This project uses a monorepo structure:**
+- `apps/mcp_server/` - MCP interface application (thin adapters)
+- `apps/rest_api/` - REST API application (thin adapters)
+- `lib/json_schema_core/` - Shared core library (all business logic)
+- `tests/lib/` - Core library unit tests
+- `tests/apps/` - Application integration tests
+
+**All business logic lives in `lib/json_schema_core/`** - the apps/ directories contain only thin protocol adapters.
 
 ---
 
@@ -68,14 +82,22 @@
 
 ### 0.1 Minimal Project Setup [~1.5 hours]
 
-- [ ] **P0.1.1** Create basic Python package structure
-  - Create `src/json_schema_mcp/` directory
-  - Create `src/json_schema_mcp/services/` directory
-  - Create `src/json_schema_mcp/domain/` directory
-  - Create `tests/unit/` directory
+- [ ] **P0.1.1** Create basic monorepo package structure
+  - Create `apps/mcp_server/` directory
+  - Create `apps/mcp_server/tools/` directory
+  - Create `apps/rest_api/` directory
+  - Create `apps/rest_api/routes/` directory
+  - Create `lib/json_schema_core/` directory
+  - Create `lib/json_schema_core/services/` directory
+  - Create `lib/json_schema_core/domain/` directory
+  - Create `lib/json_schema_core/storage/` directory
+  - Create `lib/json_schema_core/utils/` directory
+  - Create `tests/lib/` directory (core library unit tests)
+  - Create `tests/lib/services/` directory
+  - Create `tests/apps/` directory (application integration tests)
   - Create `tests/fixtures/schemas/` directory
   - Create minimal `__init__.py` files in each package
-  - **Acceptance**: Directory structure exists
+  - **Acceptance**: Monorepo directory structure exists with apps/ and lib/ separation
 
 - [ ] **P0.1.2** Create `pyproject.toml` with minimal configuration
   - Set project name: `json-schema-mcp-tool`
@@ -100,9 +122,9 @@
 - [ ] **P0.1.5** Create `pytest.ini` configuration
   - Set test paths: `testpaths = tests`
   - Set asyncio mode: `asyncio_mode = auto`
-  - Set Python paths: `pythonpath = src`
+  - Set Python paths: `pythonpath = lib`  # Core library is in lib/, not src/
   - Add markers for unit/integration tests
-  - Add coverage configuration: `addopts = --cov=src --cov-report=term-missing`
+  - Add coverage configuration: `addopts = --cov=lib --cov-report=term-missing`
   - **Acceptance**: pytest.ini exists
 
 - [ ] **P0.1.6** Install dependencies and verify pytest works
@@ -126,11 +148,11 @@
 
 ### 0.2 DocumentService Test Scaffolding [~1.5 hours]
 
-- [ ] **P0.2.1** Create `tests/unit/test_document_service.py` with test class structure
+- [ ] **P0.2.1** Create `tests/lib/services/test_document_service.py` with test class structure
   - Import pytest and required types
   - Create `TestDocumentService` class
   - Create pytest fixtures for mocked dependencies
-  - **Acceptance**: Test file structure exists
+  - **Acceptance**: Test file structure exists in lib/ test directory
 
 - [ ] **P0.2.2** Write test fixtures for DocumentService dependencies
   - Fixture: `mock_storage` (in-memory dict-based storage adapter)
@@ -209,11 +231,11 @@
 
 ### 0.3 DocumentService Interface Stub [~30 minutes]
 
-- [ ] **P0.3.1** Create `src/json_schema_mcp/services/document_service.py` with class skeleton
+- [ ] **P0.3.1** Create `lib/json_schema_core/services/document_service.py` with class skeleton
   - Create `DocumentService` class
   - Add `__init__(self, storage, validation_service, schema_service, lock_service)`
   - Add method stubs with type hints (no implementation, just `pass` or `raise NotImplementedError`)
-  - **Acceptance**: File exists, imports without error
+  - **Acceptance**: Core library service file exists, imports without error
 
 - [ ] **P0.3.2** Add method stub: `async def create_document(self) -> tuple[DocumentId, int]`
   - Add docstring describing what it should do
@@ -232,20 +254,20 @@
 ### 0.4 Run Tests (Expecting Failures) [~30 minutes]
 
 - [ ] **P0.4.1** Create stub domain models (minimal to make tests run)
-  - Create `src/json_schema_mcp/domain/models.py`
+  - Create `lib/json_schema_core/domain/models.py`
   - Add minimal `DocumentId` class (just wraps string for now)
   - Add minimal `ValidationError` class
   - Add minimal `DocumentMetadata` class
-  - **Acceptance**: Tests can import domain models
+  - **Acceptance**: Tests can import domain models from core library
 
 - [ ] **P0.4.2** Create stub error classes (minimal to make tests run)
-  - Create `src/json_schema_mcp/domain/errors.py`
+  - Create `lib/json_schema_core/domain/errors.py`
   - Define: `PathNotFoundError`, `VersionConflictError`, `ValidationFailedError`
   - Each just inherits from Exception for now
   - **Acceptance**: Tests can import error classes
 
 - [ ] **P0.4.3** Run pytest locally and verify all tests FAIL
-  - Execute: `pytest tests/unit/test_document_service.py -v`
+  - Execute: `pytest tests/lib/test_document_service.py -v`
   - Verify each test fails with NotImplementedError or similar
   - Document the test output
   - **Acceptance**: ALL TESTS FAIL locally (expected!) - we have a clear todo list
@@ -323,12 +345,12 @@
 
 ### 1.2 Configuration Management [~3 hours]
 
-**Goal**: Implement flexible configuration system (FR-001a to FR-001f)
+**Goal**: Implement flexible configuration system (FR-001a to FR-001f) in core library
 
-- [ ] **P1.2.1** Create `src/json_schema_mcp/config.py` module
+- [ ] **P1.2.1** Create `lib/json_schema_core/config.py` module
   - Define module structure
   - Import required dependencies (Pydantic, pathlib, os)
-  - **Acceptance**: Module imports successfully
+  - **Acceptance**: Core library config module imports successfully
 
 - [ ] **P1.2.2** Implement `ServerConfig` class with Pydantic BaseSettings
   - Define fields: `schema_path`, `storage_dir`, `lock_timeout`, `server_name`
@@ -365,7 +387,7 @@
   - Test file loading
   - Test environment variable override
   - Test validation errors
-  - **Acceptance**: `pytest tests/unit/test_config.py` passes
+  - **Acceptance**: `pytest tests/lib/test_config.py` passes
 
 ---
 
@@ -410,7 +432,7 @@
   - Test Document serialization
   - Test Metadata serialization with dates
   - Test ValidationReport functionality
-  - **Acceptance**: `pytest tests/unit/test_models.py` passes
+  - **Acceptance**: `pytest tests/lib/test_models.py` passes
 
 ---
 
@@ -418,7 +440,7 @@
 
 **Goal**: RFC 6901 compliant JSON Pointer operations (FR-021 to FR-025)
 
-- [ ] **P1.4.1** Create `src/json_schema_mcp/utils/json_pointer.py` module
+- [ ] **P1.4.1** Create `lib/json_schema_core/utils/json_pointer.py` module
   - Set up module structure
   - Import dependencies (typing, json)
   - **Acceptance**: Module imports successfully
@@ -465,7 +487,7 @@
   - Test get/set/delete on nested objects
   - Test array operations
   - Test error conditions (invalid path, invalid pointer format)
-  - **Acceptance**: `pytest tests/unit/test_json_pointer.py` passes with >95% coverage
+  - **Acceptance**: `pytest tests/lib/test_json_pointer.py` passes with >95% coverage
 
 ---
 
@@ -475,12 +497,12 @@
 
 **Goal**: Abstract storage with file system implementation (FR-015 to FR-020)
 
-- [ ] **P2.1.1** Create `src/json_schema_mcp/storage/base.py` module
+- [ ] **P2.1.1** Create `lib/json_schema_core/storage/base.py` module
   - Define abstract `StorageAdapter` interface
   - Declare abstract methods: `save_document()`, `load_document()`, `delete_document()`, `list_documents()`, `document_exists()`
   - **Acceptance**: Interface class defined with proper signatures
 
-- [ ] **P2.1.2** Create `src/json_schema_mcp/storage/file_storage.py` module
+- [ ] **P2.1.2** Create `lib/json_schema_core/storage/file_storage.py` module
   - Set up `FileSystemStorage` class implementing `StorageAdapter`
   - Initialize with storage directory path
   - **Acceptance**: Class instantiates with directory path
@@ -519,7 +541,7 @@
   - Test document_exists
   - Test error conditions (missing files, write failures)
   - Use temporary directory for tests
-  - **Acceptance**: `pytest tests/unit/test_file_storage.py` passes
+  - **Acceptance**: `pytest tests/lib/test_file_storage.py` passes
 
 ---
 
@@ -527,7 +549,7 @@
 
 **Goal**: Implement ULID generator for document IDs (FR-107 to FR-111)
 
-- [ ] **P2.2.1** Create `src/json_schema_mcp/utils/ulid_generator.py` module
+- [ ] **P2.2.1** Create `lib/json_schema_core/utils/ulid_generator.py` module
   - Import `ulid` library
   - **Acceptance**: Module imports successfully
 
@@ -547,7 +569,7 @@
   - Test uniqueness (generate 1000, check no duplicates)
   - Test monotonicity (same millisecond ordering)
   - Test is_valid_ulid with valid/invalid inputs
-  - **Acceptance**: `pytest tests/unit/test_ulid_generator.py` passes
+  - **Acceptance**: `pytest tests/lib/test_ulid_generator.py` passes
 
 ---
 
@@ -585,7 +607,7 @@
   - Test save/load metadata
   - Test metadata survives document updates
   - Test coordinated deletion
-  - **Acceptance**: `pytest tests/unit/test_file_storage.py` updated and passes
+  - **Acceptance**: `pytest tests/lib/test_file_storage.py` updated and passes
 
 ---
 
@@ -633,7 +655,7 @@
   - Test to_dict() serialization
   - Test error code format (kebab-case)
   - Test inheritance hierarchy
-  - **Acceptance**: `pytest tests/unit/test_errors.py` passes
+  - **Acceptance**: `pytest tests/lib/test_errors.py` passes
 
 ---
 
@@ -643,7 +665,7 @@
 
 **Goal**: Load and resolve JSON Schema with $ref support (FR-001 to FR-007, FR-086 to FR-090)
 
-- [ ] **P3.1.1** Create `src/json_schema_mcp/services/schema_service.py` module
+- [ ] **P3.1.1** Create `lib/json_schema_core/services/schema_service.py` module
   - Set up `SchemaService` class
   - Initialize with schema file path
   - **Acceptance**: Service instantiates successfully
@@ -686,7 +708,7 @@
   - Test get_node_schema for various paths
   - Test error handling (missing schema, invalid $ref)
   - Use `schemas/text.json` as test fixture
-  - **Acceptance**: `pytest tests/unit/test_schema_service.py` passes
+  - **Acceptance**: `pytest tests/lib/test_schema_service.py` passes
 
 ---
 
@@ -694,7 +716,7 @@
 
 **Goal**: Validate documents and nodes against schema (FR-058 to FR-064)
 
-- [ ] **P3.2.1** Create `src/json_schema_mcp/services/validation_service.py` module
+- [ ] **P3.2.1** Create `lib/json_schema_core/services/validation_service.py` module
   - Set up `ValidationService` class
   - Initialize with `SchemaService` dependency
   - **Acceptance**: Service instantiates with schema service
@@ -732,7 +754,7 @@
   - Test required field handling with/without defaults
   - Test error message formatting
   - Use `schemas/text.json` as test fixture
-  - **Acceptance**: `pytest tests/unit/test_validation_service.py` passes
+  - **Acceptance**: `pytest tests/lib/test_validation_service.py` passes
 
 ---
 
@@ -810,7 +832,7 @@
   - **Acceptance**: Phase 0 tests for list_documents PASS
 
 - [ ] **P4.1.7** Verify all Phase 0 DocumentService tests now pass
-  - Run: `pytest tests/unit/test_document_service.py -v`
+  - Run: `pytest tests/lib/test_document_service.py -v`
   - All ~12 tests should now PASS (were failing in Phase 0)
   - Fix any remaining failures
   - **Acceptance**: ALL Phase 0 DocumentService tests are GREEN ✅
@@ -821,7 +843,7 @@
 
 **Goal**: Implement document-level locking (FR-082 to FR-082e)
 
-- [ ] **P4.2.1** Create `src/json_schema_mcp/services/lock_service.py` module
+- [ ] **P4.2.1** Create `lib/json_schema_core/services/lock_service.py` module
   - Set up `LockService` class
   - Initialize with lock timeout configuration
   - Create in-memory lock registry (dict)
@@ -860,18 +882,23 @@
   - Test concurrent lock attempts
   - Test lock expiration
   - Test context manager
-  - **Acceptance**: `pytest tests/unit/test_lock_service.py` passes
+  - **Acceptance**: `pytest tests/lib/test_lock_service.py` passes
 
 ---
 
 ## Phase 5: Interface Layer (Week 5)
 
+**CRITICAL**: Interface layer tasks create THIN ADAPTERS ONLY in `apps/` directories:
+- `apps/mcp_server/tools/` - Parse MCP requests, call `lib/json_schema_core/services/`, format MCP responses
+- `apps/rest_api/routes/` - Parse HTTP requests, call `lib/json_schema_core/services/`, format HTTP responses
+- **NO business logic in these files** - all validation, storage, domain logic is in `lib/json_schema_core/`
+
 ### 5.1 MCP Tool Implementations [~8 hours]
 
-**Goal**: Implement all 8 MCP tools calling service layer (FR-065 to FR-069)
+**Goal**: Implement all 8 MCP tools as thin wrappers calling core library services (FR-065 to FR-069)
 
-- [ ] **P5.1.1** Create `src/json_schema_mcp/mcp_tools/document_tools.py` module
-  - Import MCP SDK and service dependencies
+- [ ] **P5.1.1** Create `apps/mcp_server/tools/document_tools.py` module
+  - Import MCP SDK and service dependencies from `lib/json_schema_core/`
   - **Acceptance**: Module imports successfully
 
 - [ ] **P5.1.2** Implement `document_create` tool (FR-065)
@@ -921,7 +948,7 @@
   - Format response: `{success, schema_uri, documents: array, total_documents, has_more}`
   - **Acceptance**: Tool lists documents via MCP
 
-- [ ] **P5.1.8** Create `src/json_schema_mcp/mcp_tools/schema_tools.py` module
+- [ ] **P5.1.8** Create `apps/mcp_server/tools/schema_tools.py` module
   - Import dependencies
   - **Acceptance**: Module imports successfully
 
@@ -939,7 +966,7 @@
   - Format response: `{success, schema_uri, root_schema, schema_version}`
   - **Acceptance**: Tool returns root schema via MCP
 
-- [ ] **P5.1.11** Create `src/json_schema_mcp/mcp_tools/tool_registry.py` module
+- [ ] **P5.1.11** Create `apps/mcp_server/tools/tool_registry.py` module
   - Register all 8 tools with MCP server
   - Define tool metadata and handlers
   - **Acceptance**: All tools registered successfully
@@ -948,7 +975,7 @@
   - Test each tool end-to-end through MCP protocol
   - Test error handling and structured responses
   - Test tool discovery
-  - **Acceptance**: `pytest tests/integration/test_mcp_tools.py` passes
+  - **Acceptance**: `pytest tests/apps/mcp_server/test_mcp_tools.py` passes
 
 ---
 
@@ -956,7 +983,7 @@
 
 **Goal**: Set up MCP server entry point
 
-- [ ] **P5.2.1** Create `src/json_schema_mcp/server.py` module
+- [ ] **P5.2.1** Create `apps/mcp_server/server.py` module
   - Set up MCP server initialization
   - Load configuration
   - Initialize all services
@@ -970,7 +997,7 @@
   - Set up error handling
   - **Acceptance**: Server instantiates correctly
 
-- [ ] **P5.2.3** Create `src/json_schema_mcp/__main__.py` entry point
+- [ ] **P5.2.3** Create `apps/mcp_server/__main__.py` entry point
   - Parse command-line arguments
   - Load configuration
   - Create and start MCP server
@@ -994,7 +1021,7 @@
 
 **Goal**: Implement dual interface with REST API alongside MCP
 
-- [ ] **P5.3.1** Create `src/json_schema_mcp/rest_api/models.py` module
+- [ ] **P5.3.1** Create `apps/rest_api/models.py` module
   - Define Pydantic request/response models
   - Models match MCP tool schemas
   - **Acceptance**: Models defined with validation
@@ -1014,7 +1041,7 @@
   - `ErrorResponse(error: str, code: str, details: dict)`
   - **Acceptance**: Response models serialize correctly
 
-- [ ] **P5.3.4** Create `src/json_schema_mcp/rest_api/routes/documents.py` module
+- [ ] **P5.3.4** Create `apps/rest_api/routes/documents.py` module
   - Set up FastAPI router for document operations
   - **Acceptance**: Router defined
 
@@ -1058,7 +1085,7 @@
   - Return 200 OK with paginated list
   - **Acceptance**: REST endpoint lists documents
 
-- [ ] **P5.3.11** Create `src/json_schema_mcp/rest_api/routes/schema.py` module
+- [ ] **P5.3.11** Create `apps/rest_api/routes/schema.py` module
   - Set up router for schema operations
   - **Acceptance**: Router defined
 
@@ -1074,7 +1101,7 @@
   - Return 200 OK with SchemaNodeResponse
   - **Acceptance**: REST endpoint returns node schema
 
-- [ ] **P5.3.14** Create `src/json_schema_mcp/rest_api/middleware.py` module
+- [ ] **P5.3.14** Create `apps/rest_api/middleware.py` module
   - Implement error handling middleware
   - Convert domain exceptions to HTTP responses
   - Add CORS middleware
@@ -1095,7 +1122,7 @@
   - Test all endpoints end-to-end
   - Test error responses and status codes
   - Verify responses match MCP tool outputs (same service calls)
-  - **Acceptance**: `pytest tests/integration/test_rest_api.py` passes
+  - **Acceptance**: `pytest tests/apps/rest_api/test_routes.py` passes
 
 ---
 
@@ -1334,11 +1361,11 @@
 **Critical Success Factors**:
 1. ✅ **CI/CD FIRST** - GitHub Actions pipeline validates every commit
 2. ✅ **Test-driven development** - Write failing tests FIRST (Phase 0)
-3. ✅ Zero code duplication (all logic in service layer)
-4. ✅ Both interfaces use identical service methods
-5. ✅ Comprehensive error handling with structured errors
-6. ✅ Clear separation of concerns (interface → service → storage)
-7. ✅ Complete documentation for users and developers
+3. ✅ **Monorepo architecture** - All business logic in `lib/json_schema_core/`, interfaces in `apps/`
+4. ✅ **Zero code duplication** - Both MCP and REST call same service methods
+5. ✅ Both interfaces use identical service methods from core library
+6. ✅ Comprehensive error handling with structured errors
+7. ✅ Clear separation of concerns (apps/ → lib/services/ → lib/storage/)
 
 **TDD Workflow with CI/CD**:
 1. **Phase 0.0**: Set up GitHub Actions (CI runs on every push)

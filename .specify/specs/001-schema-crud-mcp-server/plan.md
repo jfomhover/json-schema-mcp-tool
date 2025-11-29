@@ -2,15 +2,23 @@
 
 **Feature Branch**: `001-schema-crud-mcp-server`  
 **Created**: 2025-11-29  
+**Updated**: 2025-11-29 (Monorepo Structure)  
 **Status**: Planning  
 **Implementation Language**: Python 3.11+  
-**Target**: Model Context Protocol (MCP) Server
+**Target**: Dual Interface (MCP Server + REST API)
 
 ---
 
 ## Executive Summary
 
-This plan outlines the implementation of a Python-based MCP server that provides document-centric CRUD operations on JSON documents validated against a JSON Schema. The server will be implemented in the `src/` directory with comprehensive documentation in `docs/`.
+This plan outlines the implementation of a Python monorepo with dual interfaces: an MCP server for agent integration and a REST API for traditional HTTP clients. Both interfaces share a common core library with zero code duplication.
+
+**Repository Structure**: Monorepo with separate apps and shared core library:
+- **apps/mcp_server/** - MCP interface application (thin adapter)
+- **apps/rest_api/** - REST API application (thin adapter)
+- **lib/json_schema_core/** - Shared business logic, domain models, storage (single source of truth)
+- **tests/lib/** - Core library unit tests
+- **tests/apps/** - Application integration tests
 
 **Key Technologies:**
 - Python 3.11+ (async/await, type hints)
@@ -21,11 +29,11 @@ This plan outlines the implementation of a Python-based MCP server that provides
 - Uvicorn ASGI server for REST API
 - Structured logging with Python logging module
 
-**Architecture Pattern**: Layered architecture with clear separation of concerns:
-1. **Interface Layer**: MCP tools + REST endpoints (dual entry points - THIN ADAPTERS ONLY, NO BUSINESS LOGIC)
-2. **Service Layer**: Business logic (document operations, validation) - **100% SHARED by both interfaces - SINGLE SOURCE OF TRUTH**
-3. **Storage Layer**: File system abstraction - shared by both interfaces
-4. **Domain Layer**: Core entities and value objects - shared by both interfaces
+**Architecture Pattern**: Monorepo with layered architecture and clear separation:
+1. **apps/** - Interface Layer: MCP tools + REST endpoints (THIN ADAPTERS ONLY, NO BUSINESS LOGIC)
+2. **lib/json_schema_core/services/** - Service Layer: Business logic (document operations, validation) - **100% SHARED by both interfaces**
+3. **lib/json_schema_core/storage/** - Storage Layer: File system abstraction - shared by both interfaces
+4. **lib/json_schema_core/domain/** - Domain Layer: Core entities and value objects - shared by both interfaces
 
 **CRITICAL ARCHITECTURAL PRINCIPLE - NO CODE DUPLICATION:**
 - MCP tools (`mcp_tools/`) and REST endpoints (`rest_api/routes/`) are **thin interface adapters only**
@@ -39,9 +47,9 @@ This plan outlines the implementation of a Python-based MCP server that provides
 **Data Flow (Identical for Both Interfaces):**
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Interface Layer (Protocol Adapters - NO BUSINESS LOGIC)   │
+│  apps/ - Interface Layer (Protocol Adapters ONLY)          │
 │  ┌──────────────────┐      ┌──────────────────────────┐    │
-│  │  MCP Tools       │      │  REST API Routes         │    │
+│  │  mcp_server/     │      │  rest_api/               │    │
 │  │  - Parse MCP     │      │  - Parse HTTP requests   │    │
 │  │    requests      │      │  - Format HTTP responses │    │
 │  │  - Format MCP    │      │  - Map HTTP status codes │    │
@@ -53,17 +61,14 @@ This plan outlines the implementation of a Python-based MCP server that provides
                       │ Both call same methods
                       ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Service Layer (100% SHARED - SINGLE SOURCE OF TRUTH)      │
+│  lib/json_schema_core/ - SINGLE SOURCE OF TRUTH            │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │  DocumentService, ValidationService, SchemaService,  │  │
-│  │  LockService - ALL business logic here              │  │
-│  └────────┬─────────────────────────────────────────────┘  │
-│           │                                                 │
-└───────────┼─────────────────────────────────────────────────┘
-            ↓
-┌─────────────────────────────────────────────────────────────┐
-│  Storage Layer (SHARED)                                     │
-│  FileSystemStorage, Metadata handling                       │
+│  │  services/: DocumentService, ValidationService,      │  │
+│  │            SchemaService, LockService                │  │
+│  │  domain/: Document, Metadata, Errors                 │  │
+│  │  storage/: FileSystemStorage, Metadata handling      │  │
+│  │  utils/: JSONPointer, ULID, atomic writes            │  │
+│  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,31 +76,37 @@ This plan outlines the implementation of a Python-based MCP server that provides
 
 ## Project Structure
 
+**Architecture**: Monorepo with separate applications sharing a common core library. This structure emphasizes the dual-interface nature (MCP + REST) while enforcing zero duplication through a shared core library.
+
 ```
 json-schema-mcp-tool/
-├── src/
-│   └── json_schema_mcp/
+├── apps/                               # Application layer - deployable interfaces
+│   ├── mcp_server/                     # MCP application (thin adapter)
+│   │   ├── __init__.py
+│   │   ├── __main__.py                 # Entry point: python -m apps.mcp_server
+│   │   ├── server.py                   # MCP server initialization
+│   │   └── tools/                      # MCP tool implementations (thin wrappers)
+│   │       ├── __init__.py
+│   │       ├── document_tools.py       # document_create, document_read_node, etc.
+│   │       ├── schema_tools.py         # schema_get_node, schema_get_root
+│   │       └── registry.py             # Tool registration and metadata
+│   │
+│   └── rest_api/                       # REST API application (thin adapter)
 │       ├── __init__.py
-│       ├── __main__.py                 # Entry point for MCP: python -m json_schema_mcp
-│       ├── server.py                   # MCP server initialization
-│       ├── api_server.py               # REST API server initialization (FastAPI app)
-│       ├── config.py                   # Configuration management
-│       │
-│       ├── mcp_tools/                  # MCP tool implementations
+│       ├── __main__.py                 # Entry point: python -m apps.rest_api or uvicorn
+│       ├── app.py                      # FastAPI app initialization
+│       ├── routes/                     # REST endpoint implementations (thin wrappers)
 │       │   ├── __init__.py
-│       │   ├── document_tools.py       # document_create, document_read_node, etc.
-│       │   ├── schema_tools.py         # schema_get_node, schema_get_root
-│       │   └── tool_registry.py        # Tool registration and metadata
-│       │
-│       ├── rest_api/                   # REST API implementations
-│       │   ├── __init__.py
-│       │   ├── routes/
-│       │   │   ├── __init__.py
-│       │   │   ├── documents.py        # Document CRUD endpoints
-│       │   │   ├── schema.py           # Schema introspection endpoints
-│       │   │   └── health.py           # Health check endpoint
-│       │   ├── models.py               # Pydantic request/response models
-│       │   └── middleware.py           # CORS, error handling middleware
+│       │   ├── documents.py            # Document CRUD endpoints
+│       │   ├── schema.py               # Schema introspection endpoints
+│       │   └── health.py               # Health check endpoint
+│       ├── models.py                   # Pydantic request/response models
+│       └── middleware.py               # CORS, error handling middleware
+│
+├── lib/                                # Core library - 100% shared business logic
+│   └── json_schema_core/               # Core package (NO interface dependencies)
+│       ├── __init__.py
+│       ├── config.py                   # Configuration management (shared)
 │       │
 │       ├── services/                   # Business logic layer (SHARED by both interfaces)
 │       │   ├── __init__.py
@@ -123,11 +134,48 @@ json-schema-mcp-tool/
 │           ├── ulid_generator.py       # ULID generation
 │           └── atomic_write.py         # Write-then-rename helpers
 │
+├── tests/                              # Test suite (TDD approach)
+│   ├── apps/                           # Application-specific tests
+│   │   ├── mcp_server/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_mcp_tools.py       # MCP tool integration tests
+│   │   │   └── test_server.py          # MCP server initialization tests
+│   │   └── rest_api/
+│   │       ├── __init__.py
+│   │       ├── test_routes.py          # REST endpoint integration tests
+│   │       └── test_app.py             # FastAPI app tests
+│   │
+│   ├── lib/                            # Core library tests (unit tests)
+│   │   ├── __init__.py
+│   │   ├── services/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_document_service.py
+│   │   │   ├── test_validation_service.py
+│   │   │   ├── test_schema_service.py
+│   │   │   └── test_lock_service.py
+│   │   ├── storage/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_file_storage.py
+│   │   │   └── test_metadata.py
+│   │   ├── domain/
+│   │   │   ├── __init__.py
+│   │   │   ├── test_document.py
+│   │   │   └── test_errors.py
+│   │   └── utils/
+│   │       ├── __init__.py
+│   │       ├── test_json_pointer.py
+│   │       └── test_ulid_generator.py
+│   │
+│   └── fixtures/
+│       ├── schemas/                    # Test JSON schemas
+│       │   └── text.json               # Simple schema for unit testing (title, authors, sections/paragraphs)
+│       └── documents/                  # Test documents
+│
 ├── docs/                               # Comprehensive documentation
 │   ├── index.md                        # Documentation home
 │   ├── architecture/
-│   │   ├── overview.md                 # System architecture (dual interfaces)
-│   │   ├── layers.md                   # Layer responsibilities
+│   │   ├── overview.md                 # System architecture (monorepo structure)
+│   │   ├── layers.md                   # Layer responsibilities (apps vs lib)
 │   │   ├── data-flow.md                # Request flow diagrams (MCP + REST)
 │   │   └── concurrency.md              # Locking and versioning
 │   ├── api/
@@ -141,23 +189,8 @@ json-schema-mcp-tool/
 │   │   └── troubleshooting.md          # Common issues
 │   └── development/
 │       ├── setup.md                    # Development environment
-│       ├── testing.md                  # Test strategy (both interfaces)
+│       ├── testing.md                  # Test strategy (apps vs lib)
 │       └── contributing.md             # Contribution guidelines
-│
-├── tests/                              # Test suite (TDD approach)
-│   ├── unit/
-│   │   ├── test_document_service.py
-│   │   ├── test_validation_service.py
-│   │   ├── test_file_storage.py
-│   │   └── test_json_pointer.py
-│   ├── integration/
-│   │   ├── test_mcp_tools.py
-│   │   ├── test_rest_api.py            # REST endpoint tests
-│   │   └── test_atomic_operations.py
-│   └── fixtures/
-│       ├── schemas/                    # Test JSON schemas
-│       │   └── text.json               # Simple schema for unit testing (title, authors, sections/paragraphs)
-│       └── documents/                  # Test documents
 │
 ├── pyproject.toml                      # Python project config (Poetry/pip)
 ├── requirements.txt                    # Production dependencies
@@ -199,22 +232,22 @@ json-schema-mcp-tool/
 
 ```python
 # ❌ WRONG - Duplicated business logic
-# mcp_tools/document_tools.py
+# apps/mcp_server/tools/document_tools.py
 async def document_create():
     # Validate defaults against schema
     # Generate ULID
     # Save to storage
     # This is BAD - business logic in interface layer!
 
-# rest_api/routes/documents.py  
+# apps/rest_api/routes/documents.py  
 async def create_document():
     # DUPLICATE ULID generation here
     # DUPLICATE validation logic here
     # DUPLICATE storage logic here
     # This is BAD - duplicated code!
 
-# ✅ CORRECT - Shared service method
-# services/document_service.py
+# ✅ CORRECT - Shared service method in core library
+# lib/json_schema_core/services/document_service.py
 class DocumentService:
     async def create_document(self) -> tuple[DocumentId, int]:
         """
@@ -237,7 +270,7 @@ class DocumentService:
         # Return result (both interfaces format differently)
         return doc_id, 1
 
-# mcp_tools/document_tools.py (THIN ADAPTER)
+# apps/mcp_server/tools/document_tools.py (THIN ADAPTER)
 async def document_create(arguments: dict) -> list[TextContent]:
     """MCP tool - just call service and format MCP response (NO args needed)"""
     
@@ -250,9 +283,17 @@ async def document_create(arguments: dict) -> list[TextContent]:
         "version": version
     }))]
 
-# rest_api/routes/documents.py (THIN ADAPTER)
+# apps/rest_api/routes/documents.py (THIN ADAPTER)
 @router.post("/documents", status_code=201)
 async def create_document(document_service: DocumentService = Depends(get_document_service)):
+    """REST endpoint - just call SAME service and format HTTP response (NO request body needed)"""
+    
+    # Call SAME shared service
+    doc_id, version = await document_service.create_document()
+    
+    # Format as HTTP JSON response
+    return DocumentCreateResponse(document_id=str(doc_id), version=version)
+```
     """REST endpoint - just call SAME service and format HTTP response (NO request body needed)"""
     
     # Call SAME shared service (ALL logic here)
@@ -263,10 +304,11 @@ async def create_document(document_service: DocumentService = Depends(get_docume
 ```
 
 **Enforcement Strategy:**
-1. Code reviews MUST check: Is business logic in service layer?
-2. If logic appears in both `mcp_tools/` and `rest_api/`, it's a bug
-3. Unit tests target service layer (tested once, used by both interfaces)
-4. Integration tests verify both interfaces call same service methods
+1. Code reviews MUST check: Is business logic in `lib/json_schema_core/services/`?
+2. If logic appears in both `apps/mcp_server/` and `apps/rest_api/`, it's a bug
+3. Unit tests target core library (`tests/lib/`) - tested once, used by both interfaces
+4. Integration tests verify both interfaces (`tests/apps/`) call same service methods
+5. The `apps/` directories should contain ONLY: request parsing, response formatting, protocol-specific concerns
 
 ---
 
@@ -274,11 +316,19 @@ async def create_document(document_service: DocumentService = Depends(get_docume
 
 ### 1.1 Project Setup
 
-**Goal**: Establish Python project structure with dependencies and tooling.
+**Goal**: Establish Python monorepo structure with apps and core library.
 
 **Tasks:**
-- [ ] Create Python package structure under `src/json_schema_mcp/`
+- [ ] Create monorepo directory structure:
+  - [ ] `apps/mcp_server/` - MCP application
+  - [ ] `apps/rest_api/` - REST API application
+  - [ ] `lib/json_schema_core/` - Core library (shared business logic)
+  - [ ] `tests/apps/` - Application integration tests
+  - [ ] `tests/lib/` - Core library unit tests
 - [ ] Set up `pyproject.toml` with Poetry or setup.py
+  - [ ] Configure `lib/json_schema_core` as internal package
+  - [ ] Configure `apps/mcp_server` as executable module
+  - [ ] Configure `apps/rest_api` as executable module
 - [ ] Configure development tools:
   - [ ] Black (code formatting)
   - [ ] Pylint/Flake8 (linting)
@@ -295,25 +345,27 @@ mcp = "^1.0.0"                    # MCP Python SDK
 jsonschema = "^4.20.0"            # JSON Schema validation (Draft 2020-12)
 python-ulid = "^2.0.0"            # ULID generation
 pydantic = "^2.5.0"               # Data validation, settings, and API models
-fastapi = "^0.109.0"              # REST API framework (NEW)
-uvicorn = "^0.27.0"               # ASGI server for FastAPI (NEW)
-python-multipart = "^0.0.6"       # FastAPI form data support (NEW)
+fastapi = "^0.109.0"              # REST API framework
+uvicorn = "^0.27.0"               # ASGI server for FastAPI
+python-multipart = "^0.0.6"       # FastAPI form data support
 ```
 
 **Deliverables:**
 - ✅ Working virtual environment
 - ✅ All dependencies installed
-- ✅ Project importable: `python -m json_schema_mcp --version`
+- ✅ MCP server importable: `python -m apps.mcp_server --version`
+- ✅ REST API importable: `python -m apps.rest_api --version`
+- ✅ Core library importable: `from lib.json_schema_core import config`
 
 ---
 
 ### 1.2 Configuration Management (FR-001a to FR-001f)
 
-**Goal**: Implement configuration loading with environment variables and config file support.
+**Goal**: Implement configuration loading with environment variables and config file support in core library.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/config.py
+# lib/json_schema_core/config.py
 from pydantic_settings import BaseSettings
 from pathlib import Path
 from typing import Literal
@@ -352,7 +404,7 @@ class ServerConfig(BaseSettings):
 - Validation fails for non-writable storage_dir
 
 **Deliverables:**
-- ✅ `config.py` module with full type hints
+- ✅ `lib/json_schema_core/config.py` module with full type hints
 - ✅ Config validation with clear error messages
 - ✅ Example config file
 
@@ -360,11 +412,11 @@ class ServerConfig(BaseSettings):
 
 ### 1.3 Domain Models (FR-010, FR-107-111)
 
-**Goal**: Create core domain entities with proper encapsulation.
+**Goal**: Create core domain entities with proper encapsulation in core library.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/domain/document.py
+# lib/json_schema_core/domain/document.py
 from dataclasses import dataclass
 from typing import Any
 import json
@@ -405,7 +457,7 @@ class Document:
 ```
 
 ```python
-# src/json_schema_mcp/domain/metadata.py
+# lib/json_schema_core/domain/metadata.py
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -464,11 +516,11 @@ class DocumentMetadata:
 
 ### 1.4 JSON Pointer Implementation (FR-021 to FR-025)
 
-**Goal**: RFC 6901 compliant JSON Pointer implementation.
+**Goal**: RFC 6901 compliant JSON Pointer implementation in core library utilities.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/utils/json_pointer.py
+# lib/json_schema_core/utils/json_pointer.py
 from typing import Any
 
 class JSONPointer:
@@ -604,11 +656,11 @@ class JSONPointer:
 
 ### 2.1 Storage Interface & File Storage (FR-015 to FR-020)
 
-**Goal**: Implement storage abstraction with local file system backend.
+**Goal**: Implement storage abstraction with local file system backend in core library.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/storage/storage_interface.py
+# lib/json_schema_core/storage/storage_interface.py
 from abc import ABC, abstractmethod
 from typing import Optional
 from ..domain.document import Document, DocumentId
@@ -644,7 +696,7 @@ class StorageAdapter(ABC):
 ```
 
 ```python
-# src/json_schema_mcp/storage/file_storage.py
+# lib/json_schema_core/storage/file_storage.py
 from pathlib import Path
 import json
 import os
@@ -1134,11 +1186,11 @@ class ErrorFormatter:
 
 ### 2.2 ULID Generation (FR-107 to FR-111)
 
-**Goal**: ULID-based document ID generation.
+**Goal**: ULID-based document ID generation in core library utilities.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/utils/ulid_generator.py
+# lib/json_schema_core/utils/ulid_generator.py
 from ulid import ULID
 from ..domain.document import DocumentId
 
@@ -1184,13 +1236,13 @@ class ULIDGenerator:
 
 ### 3.1 Schema Loading & Resolution (FR-001 to FR-007, FR-086 to FR-090)
 
-**Goal**: Load JSON Schema with $ref resolution.
+**Goal**: Load JSON Schema with $ref resolution in core library.
 
-**CRITICAL**: These services are **SHARED BY BOTH INTERFACES**. Both MCP tools and REST routes use the same SchemaService and ValidationService instances with zero duplication.
+**CRITICAL**: This service lives in **lib/json_schema_core/** and is **SHARED BY BOTH INTERFACES**. Both MCP tools and REST routes use the same SchemaService and ValidationService instances with zero duplication.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/services/schema_service.py
+# lib/json_schema_core/services/schema_service.py
 from jsonschema import Draft202012Validator, RefResolver
 from jsonschema.exceptions import SchemaError
 import json
@@ -1201,10 +1253,8 @@ class SchemaService:
     JSON Schema loading and introspection (FR-086 to FR-090).
     
     **SHARED BY BOTH INTERFACES**: Called identically by:
-    - schema_get_root MCP tool
-    - schema_get_node MCP tool
-    - GET /schema REST endpoint
-    - GET /schema/node REST endpoint
+    - apps/mcp_server/tools/schema_tools.py (schema_get_root, schema_get_node)
+    - apps/rest_api/routes/schema.py (GET /schema, GET /schema/node)
     """
     
     def __init__(self, schema_path: Path):
@@ -1324,18 +1374,24 @@ class SchemaService:
 
 ### 3.2 Validation Service (FR-058 to FR-064)
 
-**Goal**: Comprehensive JSON Schema validation with detailed error reporting.
+**Goal**: Comprehensive JSON Schema validation with detailed error reporting in core library.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/services/validation_service.py
+# lib/json_schema_core/services/validation_service.py
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from typing import Any
 from ..domain.errors import ValidationReport, ValidationErrorDetail
 
 class ValidationService:
-    """JSON Schema validation service (FR-058 to FR-064)"""
+    """
+    JSON Schema validation service (FR-058 to FR-064).
+    
+    **SHARED BY BOTH INTERFACES**: Called by DocumentService which is used by both:
+    - apps/mcp_server/tools/document_tools.py
+    - apps/rest_api/routes/documents.py
+    """
     
     def __init__(self, validator: Draft202012Validator):
         self.validator = validator
@@ -1430,13 +1486,13 @@ class ValidationService:
 
 ### 4.1 Document Service - Core CRUD (FR-008 to FR-014, FR-041 to FR-057)
 
-**Goal**: Implement copy-on-write document operations.
+**Goal**: Implement copy-on-write document operations in core library.
 
-**CRITICAL**: This is the **SHARED CORE** used by BOTH MCP and REST interfaces. All business logic, validation, concurrency control, and storage operations live here. MCP tools and REST routes will call these methods directly with zero duplication.
+**CRITICAL**: This is the **SHARED CORE in lib/json_schema_core/** used by BOTH MCP and REST interfaces. All business logic, validation, concurrency control, and storage operations live here. MCP tools and REST routes will call these methods directly with zero duplication.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/services/document_service.py
+# lib/json_schema_core/services/document_service.py
 import copy
 from datetime import datetime
 from ..domain.document import Document, DocumentId
@@ -1450,6 +1506,10 @@ class DocumentService:
     """
     Document CRUD operations with copy-on-write semantics.
     
+    **SHARED BY BOTH INTERFACES**: Called identically by:
+    - apps/mcp_server/tools/document_tools.py (all 6 document_* tools)
+    - apps/rest_api/routes/documents.py (all document endpoints)
+    """
     **SHARED BY BOTH INTERFACES**: This service is called identically by:
     - MCP tools in mcp_tools/document_tools.py
     - REST routes in rest_api/routes/documents.py
@@ -1616,18 +1676,22 @@ class DocumentService:
 
 ### 4.2 Lock Service (FR-082 to FR-082e)
 
-**Goal**: Document-level locking with timeout.
+**Goal**: Document-level locking with timeout in core library.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/services/lock_service.py
+# lib/json_schema_core/services/lock_service.py
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict
 from ..domain.document import DocumentId
 
 class LockService:
-    """Document-level locking with timeout (FR-082 to FR-082e)"""
+    """
+    Document-level locking with timeout (FR-082 to FR-082e).
+    
+    **SHARED BY BOTH INTERFACES**: Used by DocumentService which is called by both apps.
+    """
     
     def __init__(self):
         # In-memory lock map keyed by doc_id (FR-082a)
@@ -1687,20 +1751,20 @@ class LockService:
 
 ---
 
-## Phase 5: MCP Integration (Week 5)
+## Phase 5: Interface Layer - MCP and REST (Week 5)
 
 ### 5.1 MCP Tool Implementations (FR-065 to FR-069)
 
-**Goal**: Implement all 8 MCP tools with JSON Schema definitions.
+**Goal**: Implement all 8 MCP tools as thin wrappers calling core library services.
 
-**CRITICAL**: MCP tools are **THIN WRAPPERS ONLY**. They parse MCP requests, call shared service methods, and format MCP responses. **ZERO business logic** in this layer - all validation, storage, and domain logic is in the service layer.
+**CRITICAL**: MCP tools in **apps/mcp_server/tools/** are **THIN WRAPPERS ONLY**. They parse MCP requests, call shared service methods from **lib/json_schema_core/services/**, and format MCP responses. **ZERO business logic** in this layer.
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/mcp_tools/document_tools.py
+# apps/mcp_server/tools/document_tools.py
 from mcp.server import Server
 from mcp.types import Tool, TextContent
-from ..services.document_service import DocumentService
+from lib.json_schema_core.services.document_service import DocumentService
 
 def register_document_tools(server: Server, document_service: DocumentService):
     """
@@ -1708,7 +1772,7 @@ def register_document_tools(server: Server, document_service: DocumentService):
     
     **ARCHITECTURAL NOTE**: These are THIN ADAPTERS only.
     - Parse MCP request format (arguments dict)
-    - Call shared DocumentService methods (ALL business logic there)
+    - Call shared DocumentService methods from lib/ (ALL business logic there)
     - Format response as MCP TextContent
     - NO validation, storage, or domain logic here
     """
@@ -1834,7 +1898,7 @@ def register_document_tools(server: Server, document_service: DocumentService):
 
 ---
 
-### 5.2 Server Initialization & MCP Resources
+### 5.2 MCP Server Initialization & Resources
 
 **Goal**: MCP server startup with configuration, service wiring, and resource URI support for document export.
 
@@ -1842,21 +1906,21 @@ def register_document_tools(server: Server, document_service: DocumentService):
 
 **Implementation:**
 ```python
-# src/json_schema_mcp/server.py
+# apps/mcp_server/server.py
 from mcp.server import Server
 from mcp.types import Resource, ResourceContents
-from .config import ServerConfig
-from .services.schema_service import SchemaService
-from .services.validation_service import ValidationService
-from .services.document_service import DocumentService
-from .services.lock_service import LockService
-from .storage.file_storage import FileSystemStorage
-from .mcp_tools import register_document_tools, register_schema_tools
+from lib.json_schema_core.config import ServerConfig
+from lib.json_schema_core.services.schema_service import SchemaService
+from lib.json_schema_core.services.validation_service import ValidationService
+from lib.json_schema_core.services.document_service import DocumentService
+from lib.json_schema_core.services.lock_service import LockService
+from lib.json_schema_core.storage.file_storage import FileSystemStorage
+from .tools import register_document_tools, register_schema_tools
 import logging
 import json
 
 async def create_server() -> Server:
-    """Initialize MCP server with all dependencies"""
+    """Initialize MCP server with all dependencies from core library"""
     
     # ===== PHASE 1: Configuration Loading (FR-001a to FR-001f) =====
     config = ServerConfig()
@@ -1869,7 +1933,7 @@ async def create_server() -> Server:
     logger = logging.getLogger(__name__)
     logger.info("Starting JSON Schema CRUD MCP Server")
     
-    # ===== PHASE 3: Storage Initialization =====
+    # ===== PHASE 3: Storage Initialization (from core library) =====
     logger.info(f"Initializing storage at {config.storage_dir}")
     storage = FileSystemStorage(config.storage_dir)
     
@@ -1882,7 +1946,7 @@ async def create_server() -> Server:
     if corrupted:
         logger.warning(f"Found {len(corrupted)} corrupted documents: {corrupted}")
     
-    # ===== PHASE 4: Schema Loading & Validation (FR-001 to FR-007, FR-086-090) =====
+    # ===== PHASE 4: Schema Loading & Validation (from core library) =====
     logger.info(f"Loading schema from {config.schema_path}")
     try:
         schema_service = SchemaService(config.schema_path)
@@ -2053,22 +2117,22 @@ if __name__ == "__main__":
 
 **Goal**: Implement FastAPI REST endpoints with identical functionality to MCP tools, enabling independent API usage.
 
-**Context**: The server must provide BOTH MCP (for agent integration) and REST API (for traditional HTTP clients) interfaces. Both interfaces share the same business logic layer and provide identical functionality (FR-065, FR-070).
+**Context**: The server must provide BOTH MCP (for agent integration) and REST API (for traditional HTTP clients) interfaces. Both interfaces share the same business logic layer from **lib/json_schema_core/** and provide identical functionality (FR-065, FR-070).
 
-**CRITICAL**: REST routes are **THIN WRAPPERS ONLY**. They parse HTTP requests, call the SAME shared service methods as MCP tools, and format HTTP responses. **ZERO business logic duplication** - all validation, storage, and domain logic is in the service layer shared with MCP.
+**CRITICAL**: REST routes in **apps/rest_api/** are **THIN WRAPPERS ONLY**. They parse HTTP requests, call the SAME shared service methods as MCP tools, and format HTTP responses. **ZERO business logic duplication** - all validation, storage, and domain logic is in the core library shared with MCP.
 
 **Implementation:**
 
 ```python
-# src/json_schema_mcp/api_server.py
+# apps/rest_api/app.py
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from .config import ServerConfig
-from .services.document_service import DocumentService
-from .services.schema_service import SchemaService
-from .rest_api.routes import documents, schema, health
-from .rest_api.middleware import error_handler_middleware
+from lib.json_schema_core.config import ServerConfig
+from lib.json_schema_core.services.document_service import DocumentService
+from lib.json_schema_core.services.schema_service import SchemaService
+from .routes import documents, schema, health
+from .middleware import error_handler_middleware
 import logging
 import uvicorn
 
@@ -2112,8 +2176,8 @@ def create_app(
     return app
 
 async def run_rest_server(port: int = 8080):
-    """Run REST API server"""
-    # Initialize all services (same as MCP server)
+    """Run REST API server - uses SAME core library services as MCP"""
+    # Initialize all services from core library (identical to MCP server)
     config = ServerConfig()
     storage = FileSystemStorage(config.storage_dir)
     schema_service = SchemaService(config.schema_path)
@@ -2130,7 +2194,7 @@ async def run_rest_server(port: int = 8080):
     await server.serve()
 
 
-# src/json_schema_mcp/rest_api/models.py
+# apps/rest_api/models.py
 from pydantic import BaseModel, Field
 from typing import Any, Optional, List
 
@@ -2581,31 +2645,48 @@ if __name__ == "__main__":
 
 ### 6.1 Test Suite (TDD Approach)
 
-**Test Structure:**
+**Test Structure (Aligned with Monorepo):**
 ```
 tests/
-├── unit/
-│   ├── test_config.py
-│   ├── test_document.py
-│   ├── test_json_pointer.py
-│   ├── test_ulid_generator.py
-│   ├── test_schema_service.py
-│   ├── test_validation_service.py
-│   ├── test_document_service.py
-│   ├── test_lock_service.py
-│   └── test_file_storage.py
-├── integration/
-│   ├── test_atomic_operations.py
-│   ├── test_concurrency.py
-│   ├── test_mcp_tools.py          # MCP interface tests
-│   ├── test_rest_api.py            # REST interface tests
-│   └── test_end_to_end.py
+├── lib/                           # Core library unit tests (lib/json_schema_core/)
+│   ├── services/
+│   │   ├── test_schema_service.py
+│   │   ├── test_validation_service.py
+│   │   ├── test_document_service.py
+│   │   └── test_lock_service.py
+│   ├── storage/
+│   │   ├── test_file_storage.py
+│   │   └── test_metadata.py
+│   ├── domain/
+│   │   ├── test_document.py
+│   │   ├── test_metadata.py
+│   │   └── test_errors.py
+│   └── utils/
+│       ├── test_json_pointer.py
+│       ├── test_ulid_generator.py
+│       └── test_atomic_write.py
+│
+├── apps/                          # Application integration tests
+│   ├── mcp_server/
+│   │   ├── test_mcp_tools.py      # MCP tool integration tests
+│   │   └── test_server.py         # MCP server initialization tests
+│   └── rest_api/
+│       ├── test_routes.py         # REST endpoint integration tests  
+│       └── test_app.py            # FastAPI app tests
+│
+├── integration/                   # Cross-component tests
+│   ├── test_atomic_operations.py  # Atomic write/rename tests
+│   ├── test_concurrency.py        # Lock service + version conflict tests
+│   ├── test_interface_parity.py   # Verify MCP and REST return identical results
+│   └── test_end_to_end.py         # Complete workflows
+│
 └── fixtures/
     ├── schemas/
-    │   ├── text.json                # Primary test schema (copied from schemas/text.json in repo)
-    │   └── invalid.schema.json      # Invalid schema for error handling tests
+    │   ├── text.json               # Primary test schema (from repo root schemas/)
+    │   └── invalid.schema.json     # Invalid schema for error handling tests
     └── documents/
-        └── text-example.json        # Example text document for testing
+        └── text-example.json       # Example text document for testing
+```
 
 **Test Schema: text.json**
 - **Purpose**: Unit testing DocumentService operations against spec requirements
@@ -2616,32 +2697,30 @@ tests/
   - Nested structure to test JSON Pointer navigation
   - Array operations to test create/update/delete on array elements
 - **Usage**: All DocumentService unit tests will use this schema to ensure proper validation, node operations, and version control
-```
 
 **Test Coverage Goals:**
-- Unit tests: >90% coverage
-- Integration tests: All user stories from spec
-- End-to-end: Complete workflows through BOTH interfaces (MCP + REST)
-- Interface parity: Verify MCP tools and REST endpoints provide identical results
+- **Core library unit tests**: >90% coverage on `lib/json_schema_core/` (tested once, used by both interfaces)
+- **Interface integration tests**: All user stories from spec verified through BOTH MCP and REST
+- **Interface parity tests**: Verify MCP tools and REST endpoints provide identical results for same inputs
+- **End-to-end tests**: Complete workflows through BOTH interfaces (MCP + REST)
 
 **REST API Test Examples:**
 ```python
-# tests/integration/test_rest_api.py
+# tests/apps/rest_api/test_routes.py
 from fastapi.testclient import TestClient
-from src.json_schema_mcp.api_server import create_app
+from apps.rest_api.app import create_app
+from lib.json_schema_core.services.document_service import DocumentService
 import pytest
 
 @pytest.fixture
 def client(document_service, schema_service, config):
-    """Create test client"""
+    """Create test client with core library services"""
     app = create_app(document_service, schema_service, config)
     return TestClient(app)
 
 def test_create_document_rest(client):
-    """Test POST /documents"""
-    response = client.post("/documents", json={
-        "document_id": "01HQ7X...",
-        "content": {"title": "Test Book"}
+    """Test POST /documents endpoint (thin wrapper test)"""
+    response = client.post("/documents")
     })
     assert response.status_code == 201
     assert response.json()["version"] == 1
