@@ -26,10 +26,11 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["lib.json_schema_core"]
+packages = ["lib.json_schema_core", "apps.mcp_server"]
 
 [tool.setuptools.package-dir]
 "lib.json_schema_core" = "lib/json_schema_core"
+"apps.mcp_server" = "apps/mcp_server"
 
 [tool.ruff]
 line-length = 100
