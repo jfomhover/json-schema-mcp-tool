@@ -2,11 +2,14 @@
 DocumentService - Core CRUD operations for documents
 """
 from datetime import datetime
+from typing import Any
 from json_schema_core.storage.storage_interface import StorageInterface
 from json_schema_core.services.schema_service import SchemaService
 from json_schema_core.services.validation_service import ValidationService
 from json_schema_core.domain.document_id import DocumentId
 from json_schema_core.domain.metadata import DocumentMetadata
+from json_schema_core.domain.errors import DocumentNotFoundError
+from json_schema_core.utils.json_pointer import resolve_pointer
 
 
 class DocumentService:
@@ -92,3 +95,42 @@ class DocumentService:
         self.storage.write_metadata(doc_id, metadata.model_dump(mode='json'))
         
         return doc_id, metadata
+    
+    def read_node(self, doc_id: str, node_path: str) -> tuple[Any, int]:
+        """
+        Read a document or a specific node within a document using JSONPointer
+        
+        Args:
+            doc_id: The ID of the document to read
+            node_path: JSONPointer path to the node (use "/" for root)
+            
+        Returns:
+            Tuple of (node_value, version)
+            
+        Raises:
+            DocumentNotFoundError: If document not found
+            PathNotFoundError: If node_path doesn't exist in document
+        """
+        # Load document from storage
+        try:
+            document = self.storage.read_document(doc_id)
+        except Exception as e:
+            if "not found" in str(e).lower():
+                raise DocumentNotFoundError(doc_id)
+            raise
+        
+        # Load metadata to get version
+        metadata_dict = self.storage.read_metadata(doc_id)
+        if metadata_dict is None:
+            raise DocumentNotFoundError(doc_id)
+        
+        version = metadata_dict["version"]
+        
+        # Resolve the path in the document
+        if node_path == "/":
+            # Root path - return full document
+            return document, version
+        else:
+            # Use JSONPointer to resolve path
+            value = resolve_pointer(document, node_path)
+            return value, version
