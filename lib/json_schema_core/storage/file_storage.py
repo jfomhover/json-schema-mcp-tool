@@ -87,7 +87,20 @@ class FileSystemStorage(StorageInterface):
         Returns:
             List of document IDs
         """
-        raise NotImplementedError("list_documents not yet implemented")
+        # Find all .json files (excluding .meta.json files)
+        doc_ids = []
+        for file_path in self.base_path.glob("*.json"):
+            # Skip metadata files
+            if file_path.suffix == ".json" and not file_path.name.endswith(".meta.json"):
+                # Extract document ID (filename without .json extension)
+                doc_id = file_path.stem
+                doc_ids.append(doc_id)
+        
+        # Sort for consistent ordering
+        doc_ids.sort()
+        
+        # Apply pagination
+        return doc_ids[offset:offset + limit]
     
     def read_metadata(self, doc_id: str) -> dict | None:
         """Read document metadata.

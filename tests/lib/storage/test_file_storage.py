@@ -220,3 +220,50 @@ def test_write_metadata_durable(tmp_path):
     with open(meta_file, "r") as f:
         saved_metadata = json.load(f)
     assert saved_metadata == metadata
+
+
+def test_list_documents_empty(tmp_path):
+    """Test that list_documents returns empty list for empty storage."""
+    storage = FileSystemStorage(tmp_path)
+    
+    result = storage.list_documents()
+    assert result == []
+
+
+def test_list_documents_returns_doc_ids(tmp_path):
+    """Test that list_documents returns list of document IDs."""
+    storage = FileSystemStorage(tmp_path)
+    
+    # Write several documents
+    doc_ids = ["doc-1", "doc-2", "doc-3"]
+    for doc_id in doc_ids:
+        storage.write_document(doc_id, {"data": "test"})
+    
+    result = storage.list_documents()
+    assert len(result) == 3
+    assert set(result) == set(doc_ids)
+
+
+def test_list_documents_pagination(tmp_path):
+    """Test that list_documents supports limit and offset."""
+    storage = FileSystemStorage(tmp_path)
+    
+    # Write 10 documents
+    doc_ids = [f"doc-{i:02d}" for i in range(10)]
+    for doc_id in doc_ids:
+        storage.write_document(doc_id, {"data": "test"})
+    
+    # Test limit
+    result = storage.list_documents(limit=5)
+    assert len(result) == 5
+    
+    # Test offset
+    result = storage.list_documents(limit=5, offset=5)
+    assert len(result) == 5
+    
+    # Test limit + offset covers all docs
+    page1 = storage.list_documents(limit=5, offset=0)
+    page2 = storage.list_documents(limit=5, offset=5)
+    all_docs = page1 + page2
+    assert len(all_docs) == 10
+    assert set(all_docs) == set(doc_ids)
