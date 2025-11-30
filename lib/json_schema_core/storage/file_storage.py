@@ -98,13 +98,40 @@ class FileSystemStorage(StorageInterface):
         Returns:
             Metadata dictionary or None if not found
         """
-        raise NotImplementedError("read_metadata not yet implemented")
+        meta_file = self.base_path / f"{doc_id}.meta.json"
+        
+        if not meta_file.exists():
+            return None
+        
+        with open(meta_file, "r") as f:
+            return json.load(f)
     
     def write_metadata(self, doc_id: str, metadata: dict) -> None:
-        """Write document metadata.
+        """Write document metadata with atomic operation and durability guarantee.
+        
+        Uses temp file + rename pattern for atomicity.
+        Calls fsync to ensure data reaches disk.
         
         Args:
             doc_id: Document identifier
             metadata: Metadata dictionary
         """
-        raise NotImplementedError("write_metadata not yet implemented")
+        meta_file = self.base_path / f"{doc_id}.meta.json"
+        tmp_file = self.base_path / f"{doc_id}.meta.tmp"
+        
+        try:
+            # Write to temp file
+            with open(tmp_file, "w") as f:
+                json.dump(metadata, f, indent=2)
+                f.flush()
+                # Ensure data reaches disk before rename
+                os.fsync(f.fileno())
+            
+            # Atomic rename (on POSIX systems)
+            tmp_file.rename(meta_file)
+            
+        except Exception:
+            # Clean up temp file on any error
+            if tmp_file.exists():
+                tmp_file.unlink()
+            raise

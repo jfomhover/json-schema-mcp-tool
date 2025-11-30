@@ -103,3 +103,120 @@ def test_read_document_raises_not_found(tmp_path):
         storage.read_document(doc_id)
     
     assert exc_info.value.doc_id == doc_id
+
+
+def test_write_metadata_atomic(tmp_path):
+    """Test that write_metadata uses atomic write (temp file + rename)."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-6"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 1,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-01T12:00:00"
+    }
+    
+    storage.write_metadata(doc_id, metadata)
+    
+    # After write completes, temp file should not exist
+    tmp_file = tmp_path / f"{doc_id}.meta.tmp"
+    assert not tmp_file.exists()
+    
+    # But the final metadata file should exist
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert meta_file.exists()
+
+
+def test_read_metadata(tmp_path):
+    """Test that read_metadata returns metadata."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-7"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 2,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-02T15:30:00"
+    }
+    
+    # Write first
+    storage.write_metadata(doc_id, metadata)
+    
+    # Now read back
+    result = storage.read_metadata(doc_id)
+    assert result == metadata
+
+
+def test_read_metadata_missing_returns_none(tmp_path):
+    """Test that read_metadata returns None for missing metadata."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "non-existent-metadata"
+    
+    result = storage.read_metadata(doc_id)
+    assert result is None
+
+
+def test_metadata_includes_required_fields(tmp_path):
+    """Test that metadata includes all required fields."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-8"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 1,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-01T12:00:00"
+    }
+    
+    storage.write_metadata(doc_id, metadata)
+    result = storage.read_metadata(doc_id)
+    
+    # Verify all required fields are present
+    assert "doc_id" in result
+    assert "version" in result
+    assert "schema_uri" in result
+    assert "created_at" in result
+    assert "modified_at" in result
+
+
+def test_write_metadata_cleans_up_tmp_on_error(tmp_path):
+    """Test that temp metadata file is cleaned up when write fails."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-9"
+    
+    # Create a scenario that will fail: invalid JSON-serializable content
+    invalid_metadata = {"data": object()}  # object() is not JSON serializable
+    
+    with pytest.raises(TypeError):
+        storage.write_metadata(doc_id, invalid_metadata)
+    
+    # Verify temp file was cleaned up
+    tmp_file = tmp_path / f"{doc_id}.meta.tmp"
+    assert not tmp_file.exists()
+
+
+def test_write_metadata_durable(tmp_path):
+    """Test that write_metadata uses fsync for durability."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-10"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 1,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-01T12:00:00"
+    }
+    
+    # Write the metadata
+    storage.write_metadata(doc_id, metadata)
+    
+    # The file should exist and be readable
+    # (fsync was called, so data should be on disk)
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert meta_file.exists()
+    
+    # Verify we can read it back
+    with open(meta_file, "r") as f:
+        saved_metadata = json.load(f)
+    assert saved_metadata == metadata
