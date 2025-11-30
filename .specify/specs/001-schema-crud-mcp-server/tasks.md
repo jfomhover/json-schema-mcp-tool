@@ -35,419 +35,671 @@
 
 ---
 
-## Phase 0: TDD Bootstrap - Document Service Tests First [Day 1, ~5.5 hours]
+## Phase 0: TDD Bootstrap - Core Library Foundation [Day 1, ~6 hours]
 
-**Goal**: Set up CI/CD pipeline and write DocumentService unit tests BEFORE implementation
+**Goal**: Build DocumentService core library incrementally with TRUE TDD - each task produces a test file + implementation file pair
 
-**Philosophy**: We write the tests first to:
-1. Define the API contract before coding
-2. Ensure our design is testable
-3. Have failing tests that guide implementation
-4. Verify our understanding of the spec requirements
-5. **Automate validation** - GitHub Actions runs tests on every commit
+**Philosophy - True TDD Cycle (Red-Green-Refactor):**
+1. **RED**: Write a failing test for ONE specific behavior
+2. **GREEN**: Write minimal code to make that ONE test pass
+3. **REFACTOR**: Clean up code while keeping tests green
+4. **COMMIT**: Commit the test + implementation together
+5. **REPEAT**: Move to next behavior
 
-### 0.0 CI/CD Setup - GitHub Actions for TDD [~30 minutes]
+**Why This Approach:**
+- ✅ Each task is self-contained (test + impl)
+- ✅ No overlap between tasks - clear dependencies
+- ✅ Can commit after each task with passing tests
+- ✅ Focus on DocumentService CORE LIBRARY first
+- ✅ MCP and REST interfaces come later (they're just thin adapters)
 
-**Goal**: Establish automated testing pipeline FIRST, before any code
+---
 
-- [ ] **P0.0.1** Create `.github/workflows/` directory
-  - Create directory structure: `.github/workflows/`
-  - **Acceptance**: Directory exists
+### 0.0 CI/CD Setup - GitHub Actions for TDD [~30 minutes] ✅ COMPLETE
 
-- [ ] **P0.0.2** Create `ci.yml` GitHub Actions workflow
-  - Create `.github/workflows/ci.yml`
-  - Configure trigger: `on: [push, pull_request]`
-  - Set up Python 3.11 environment
-  - **Acceptance**: Workflow file exists
-
-- [ ] **P0.0.3** Add test execution steps to workflow
-  - Step: Install dependencies (`pip install -e .[dev]` or `poetry install`)
-  - Step: Run pytest with coverage (`pytest --cov=src --cov-report=term --cov-report=xml`)
-  - Step: Upload coverage to Codecov (optional but recommended)
-  - **Acceptance**: Workflow runs tests and generates coverage
-
-- [ ] **P0.0.4** Create dummy test to validate CI pipeline
-  - Create `tests/test_dummy.py` with one passing test: `def test_dummy(): assert True`
-  - Commit and push to trigger GitHub Action
-  - Verify workflow runs successfully (green check)
-  - **Acceptance**: GitHub Action runs, shows 100% coverage for dummy test
-
-- [ ] **P0.0.5** Add coverage badge to README (optional)
-  - Add Codecov or coverage badge markdown to README.md
-  - **Acceptance**: Badge shows in repository
+- [x] **P0.0.1** Create `.github/workflows/` directory
+- [x] **P0.0.2** Create `ci.yml` GitHub Actions workflow  
+- [x] **P0.0.3** Add test execution steps to workflow
+- [x] **P0.0.4** Create dummy test to validate CI pipeline
+- [x] **P0.0.5** Add coverage badge to README
 
 **🎯 Critical**: This CI/CD pipeline will validate EVERY subsequent task. All future commits must keep tests green!
 
 ---
 
-### 0.1 Minimal Project Setup [~1.5 hours]
+### 0.1 Project Structure + Domain Models [~45 minutes]
 
-- [ ] **P0.1.1** Create basic monorepo package structure
-  - Create `apps/mcp_server/` directory
-  - Create `apps/mcp_server/tools/` directory
-  - Create `apps/rest_api/` directory
-  - Create `apps/rest_api/routes/` directory
-  - Create `lib/json_schema_core/` directory
-  - Create `lib/json_schema_core/services/` directory
-  - Create `lib/json_schema_core/domain/` directory
-  - Create `lib/json_schema_core/storage/` directory
-  - Create `lib/json_schema_core/utils/` directory
-  - Create `tests/lib/` directory (core library unit tests)
-  - Create `tests/lib/services/` directory
-  - Create `tests/apps/` directory (application integration tests)
-  - Create `tests/fixtures/schemas/` directory
-  - Create minimal `__init__.py` files in each package
-  - **Acceptance**: Monorepo directory structure exists with apps/ and lib/ separation
+**Goal**: Set up Python project with core domain models needed for DocumentService
 
-- [ ] **P0.1.2** Create `pyproject.toml` with minimal configuration
-  - Set project name: `json-schema-mcp-tool`
-  - Set version: `0.1.0`
-  - Set Python version requirement: `>=3.11`
-  - Add build system: `setuptools` or `poetry`
-  - Add optional dependencies group: `[dev]` with test dependencies
-  - **Acceptance**: pyproject.toml exists with metadata
+- [ ] **P0.1.1** Create monorepo directory structure
+  - Create `lib/json_schema_core/` with `__init__.py`
+  - Create `lib/json_schema_core/domain/` with `__init__.py`
+  - Create `lib/json_schema_core/services/` with `__init__.py`
+  - Create `lib/json_schema_core/storage/` with `__init__.py`
+  - Create `lib/json_schema_core/utils/` with `__init__.py`
+  - Create `tests/lib/` with `__init__.py`
+  - Create `tests/lib/domain/` with `__init__.py`
+  - Create `tests/fixtures/schemas/` (no __init__.py needed)
+  - **Acceptance**: Directory structure exists, can import `lib.json_schema_core`
+  - **Commit**: `"chore: create monorepo structure for core library"`
 
-- [ ] **P0.1.3** Add test dependencies to `pyproject.toml`
-  - Add `pytest = "^8.0.0"`
-  - Add `pytest-asyncio = "^0.23.0"`
-  - Add `pytest-cov = "^4.1.0"` (for coverage)
-  - **Acceptance**: Test dependencies listed
+- [ ] **P0.1.2** Create `pyproject.toml` with dependencies
+  - Project name: `json-schema-mcp-tool`, version: `0.1.0`
+  - Python: `>=3.11`
+  - Core deps: `jsonschema = "^4.20.0"`, `python-ulid = "^2.2.0"`, `pydantic = "^2.5.0"`
+  - Dev deps: `pytest = "^8.0.0"`, `pytest-asyncio = "^0.23.0"`, `pytest-cov = "^4.1.0"`
+  - **Acceptance**: Can run `pip install -e .` without errors
+  - **Commit**: `"chore: add pyproject.toml with core dependencies"`
 
-- [ ] **P0.1.4** Add core dependencies to `pyproject.toml`
-  - Add `jsonschema = "^4.20.0"` (JSON Schema validation)
-  - Add `python-ulid = "^2.2.0"` (ULID generation)
-  - Add `pydantic = "^2.5.0"` (data validation)
-  - **Acceptance**: Core dependencies listed
+- [ ] **P0.1.3** Create `pytest.ini` configuration
+  - Set `testpaths = tests`
+  - Set `asyncio_mode = auto`
+  - Set `pythonpath = lib` (so tests can import from lib.json_schema_core)
+  - Set `addopts = --cov=lib --cov-report=term-missing --cov-report=xml --cov-report=html --junitxml=pytest-report.xml -v`
+  - **Acceptance**: `pytest --version` works, pytest.ini is read
+  - **Commit**: `"chore: configure pytest for monorepo structure"`
 
-- [ ] **P0.1.5** Create `pytest.ini` configuration
-  - Set test paths: `testpaths = tests`
-  - Set asyncio mode: `asyncio_mode = auto`
-  - Set Python paths: `pythonpath = lib`  # Core library is in lib/, not src/
-  - Add markers for unit/integration tests
-  - Add coverage configuration: `addopts = --cov=lib --cov-report=term-missing`
-  - **Acceptance**: pytest.ini exists
+- [ ] **P0.1.4** Write test + impl: DocumentId value object
+  - **TEST**: Create `tests/lib/domain/test_document_id.py`
+    - Test: `test_document_id_from_ulid_string()` - Create from ULID string
+    - Test: `test_document_id_generate()` - Generate new ULID
+    - Test: `test_document_id_str_conversion()` - Convert to string
+  - **IMPL**: Create `lib/json_schema_core/domain/document_id.py`
+    - Class: `DocumentId` (wraps ULID string)
+    - Method: `__init__(self, value: str)`
+    - Method: `@classmethod def generate(cls) -> DocumentId`
+    - Method: `__str__(self) -> str`
+  - **Acceptance**: Tests pass, 100% coverage on DocumentId
+  - **Commit**: `"feat(domain): add DocumentId value object with tests"`
 
-- [ ] **P0.1.6** Install dependencies and verify pytest works
-  - Run: `pip install -e .[dev]` or `poetry install`
-  - Verify: `pytest --version` works
-  - Remove `tests/test_dummy.py` (was only for CI validation)
-  - Verify: `pytest tests/` runs (no tests yet, but should not error)
-  - **Acceptance**: Can run pytest command, CI still green
+- [ ] **P0.1.5** Write test + impl: Domain exceptions
+  - **TEST**: Create `tests/lib/domain/test_errors.py`
+    - Test: `test_path_not_found_error()` - Can raise and catch
+    - Test: `test_version_conflict_error()` - Contains version info
+    - Test: `test_validation_failed_error()` - Contains validation details
+    - Test: `test_document_not_found_error()` - Contains doc_id
+  - **IMPL**: Create `lib/json_schema_core/domain/errors.py`
+    - Class: `PathNotFoundError(Exception)` - has `path: str`
+    - Class: `VersionConflictError(Exception)` - has `expected: int, actual: int`
+    - Class: `ValidationFailedError(Exception)` - has `errors: list`
+    - Class: `DocumentNotFoundError(Exception)` - has `doc_id: str`
+  - **Acceptance**: All tests pass
+  - **Commit**: `"feat(domain): add domain exceptions with tests"`
+
+- [ ] **P0.1.6** Write test + impl: DocumentMetadata value object
+  - **TEST**: Create `tests/lib/domain/test_metadata.py`
+    - Test: `test_metadata_creation()` - Create with all fields
+    - Test: `test_metadata_from_dict()` - Deserialize from dict
+    - Test: `test_metadata_to_dict()` - Serialize to dict
+    - Test: `test_metadata_increment_version()` - Update version and timestamp
+  - **IMPL**: Create `lib/json_schema_core/domain/metadata.py`
+    - Class: `DocumentMetadata` (Pydantic model or dataclass)
+    - Fields: `doc_id: str, version: int, created_at: datetime, updated_at: datetime`
+    - Method: `increment_version(self) -> DocumentMetadata`
+  - **Acceptance**: All tests pass
+  - **Commit**: `"feat(domain): add DocumentMetadata with tests"`
 
 - [ ] **P0.1.7** Copy test schema to fixtures
   - Copy `schemas/text.json` to `tests/fixtures/schemas/text.json`
-  - **Acceptance**: Test schema file available at `tests/fixtures/schemas/text.json`
+  - Create `tests/fixtures/schemas/__init__.py` that exports path constant
+  - **Acceptance**: Test can import schema path
+  - **Commit**: `"test: add text.json schema to fixtures"`
 
-- [ ] **P0.1.8** Create sample test data file
-  - Create `tests/fixtures/sample_text_documents.py` with example text documents
-  - Include valid minimal document: `{"title": "Test", "authors": ["Author"], "sections": []}`
-  - Include valid complete document with sections containing paragraphs
-  - Include invalid documents (missing title, missing authors, wrong types)
-  - Export as module-level constants or functions
-  - **Acceptance**: Sample data can be imported: `from tests.fixtures.sample_text_documents import VALID_MINIMAL_DOCUMENT`
-
-### 0.2 DocumentService Test Scaffolding [~1.5 hours]
-
-- [ ] **P0.2.1** Create `tests/lib/services/test_document_service.py` with test class structure
-  - Import pytest and required types
-  - Create `TestDocumentService` class
-  - Create pytest fixtures for mocked dependencies
-  - **Acceptance**: Test file structure exists in lib/ test directory
-
-- [ ] **P0.2.2** Write test fixtures for DocumentService dependencies
-  - Fixture: `mock_storage` (in-memory dict-based storage adapter)
-  - Fixture: `mock_validation_service` (returns valid by default)
-  - Fixture: `mock_schema_service` (loads text.json schema)
-  - Fixture: `mock_lock_service` (no-op lock)
-  - Fixture: `document_service` (instantiate with mock dependencies)
-  - **Acceptance**: Fixtures defined and importable
-
-- [ ] **P0.2.3** Write test: `test_create_document_returns_doc_id_and_version`
-  - Test that `create_document()` returns tuple of (DocumentId, int)
-  - Assert version is 1 for new document
-  - Assert document ID is valid ULID format
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.4** Write test: `test_create_document_applies_defaults_from_schema`
-  - Test that created document has `sections: []` even if not provided
-  - Test that required fields `title` and `authors` must have defaults or raise error
-  - Load text.json schema and verify default values applied
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.5** Write test: `test_read_node_returns_content_and_version`
-  - Create a document with sample data
-  - Test reading root node "/" returns full document
-  - Test reading nested node "/title" returns string
-  - Test reading array node "/authors/0" returns first author
-  - Assert version returned matches document version
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.6** Write test: `test_read_node_raises_error_for_invalid_path`
-  - Test that reading non-existent path "/invalid" raises PathNotFoundError
-  - Test that reading "/authors/99" raises PathNotFoundError
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.7** Write test: `test_update_node_increments_version`
-  - Create document
-  - Update a node (e.g., change title)
-  - Assert version incremented from 1 to 2
-  - Assert node value updated
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.8** Write test: `test_update_node_validates_against_schema`
-  - Create document
-  - Try to update "/title" with invalid type (e.g., number instead of string)
-  - Assert ValidationFailedError raised
-  - Assert version NOT incremented
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.9** Write test: `test_update_node_enforces_optimistic_locking`
-  - Create document (version 1)
-  - Update with correct version (version=1) - should succeed
-  - Try to update again with stale version (version=1) - should fail
-  - Assert VersionConflictError raised
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.10** Write test: `test_create_node_adds_new_section`
-  - Create document with empty sections
-  - Create new node at "/sections/0" with section data
-  - Assert sections array now has 1 element
-  - Assert version incremented
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.11** Write test: `test_delete_node_removes_section`
-  - Create document with 2 sections
-  - Delete node at "/sections/1"
-  - Assert sections array now has 1 element
-  - Assert version incremented
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-- [ ] **P0.2.12** Write test: `test_list_documents_returns_metadata`
-  - Create 3 documents
-  - Call list_documents(limit=10, offset=0)
-  - Assert returns list of 3 metadata dicts
-  - Assert each has doc_id, version, created_at, updated_at
-  - **Acceptance**: Test written, will FAIL (method not implemented)
-
-### 0.3 DocumentService Interface Stub [~30 minutes]
-
-- [ ] **P0.3.1** Create `lib/json_schema_core/services/document_service.py` with class skeleton
-  - Create `DocumentService` class
-  - Add `__init__(self, storage, validation_service, schema_service, lock_service)`
-  - Add method stubs with type hints (no implementation, just `pass` or `raise NotImplementedError`)
-  - **Acceptance**: Core library service file exists, imports without error
-
-- [ ] **P0.3.2** Add method stub: `async def create_document(self) -> tuple[DocumentId, int]`
-  - Add docstring describing what it should do
-  - Body: `raise NotImplementedError("To be implemented in Phase 4")`
-  - **Acceptance**: Method signature defined
-
-- [ ] **P0.3.3** Add method stubs for all CRUD operations
-  - `async def read_node(self, doc_id: DocumentId, node_path: str) -> tuple[Any, int]`
-  - `async def update_node(self, doc_id: DocumentId, node_path: str, node_data: Any, expected_version: int) -> tuple[Any, int]`
-  - `async def create_node(self, doc_id: DocumentId, node_path: str, node_data: Any, expected_version: int) -> tuple[str, int]`
-  - `async def delete_node(self, doc_id: DocumentId, node_path: str, expected_version: int) -> tuple[Any, int]`
-  - `async def list_documents(self, limit: int = 100, offset: int = 0) -> list[dict]`
-  - All with `raise NotImplementedError()` bodies
-  - **Acceptance**: All method signatures defined with type hints
-
-### 0.4 Run Tests (Expecting Failures) [~30 minutes]
-
-- [ ] **P0.4.1** Create stub domain models (minimal to make tests run)
-  - Create `lib/json_schema_core/domain/models.py`
-  - Add minimal `DocumentId` class (just wraps string for now)
-  - Add minimal `ValidationError` class
-  - Add minimal `DocumentMetadata` class
-  - **Acceptance**: Tests can import domain models from core library
-
-- [ ] **P0.4.2** Create stub error classes (minimal to make tests run)
-  - Create `lib/json_schema_core/domain/errors.py`
-  - Define: `PathNotFoundError`, `VersionConflictError`, `ValidationFailedError`
-  - Each just inherits from Exception for now
-  - **Acceptance**: Tests can import error classes
-
-- [ ] **P0.4.3** Run pytest locally and verify all tests FAIL
-  - Execute: `pytest tests/lib/test_document_service.py -v`
-  - Verify each test fails with NotImplementedError or similar
-  - Document the test output
-  - **Acceptance**: ALL TESTS FAIL locally (expected!) - we have a clear todo list
-
-- [ ] **P0.4.4** Commit the failing tests and verify CI
-  - Commit message: "feat: Add DocumentService TDD tests (all failing by design)"
-  - Push to feature branch
-  - Verify GitHub Action runs and shows failing tests (expected)
-  - Check coverage report is generated
-  - **Acceptance**: CI runs, tests fail as expected, coverage report available
-
-- [ ] **P0.4.5** Create `tests/fixtures/sample_text_documents.py` with example data
-  - Define valid minimal document: `{"title": "Test", "authors": ["Author"], "sections": []}`
-  - Define valid full document with sections and paragraphs
-  - Define invalid documents (missing title, missing authors, wrong types)
-  - Export as constants or fixtures
-  - **Acceptance**: Sample data available for tests
-
-**🎯 Phase 0 Complete When:**
-- ✅ **GitHub Actions CI/CD pipeline running on every commit**
-- ✅ All DocumentService unit tests written and failing
-- ✅ DocumentService interface fully defined with type hints
-- ✅ Test fixtures and sample data ready
-- ✅ Clear TODO list of what needs implementation (the tests!)
-- ✅ Can run `pytest` and see ~12 failing tests
-- ✅ **CI pipeline validates every subsequent commit**
-- ✅ Ready to proceed with "real" implementation phases
+**Remove tests/test_dummy.py** after P0.1.3 completes
 
 ---
 
-## Phase 1: Foundation & Core Infrastructure (Week 1)
+### 0.2 Storage Layer - FileSystemStorage [~1.5 hours]
 
-### 1.1 Development Tools & Quality [~3 hours]
+**Goal**: Build storage abstraction with tests BEFORE DocumentService needs it
+
+- [ ] **P0.2.1** Write test + impl: StorageInterface (abstract base)
+  - **TEST**: Create `tests/lib/storage/test_storage_interface.py`
+    - Test: `test_cannot_instantiate_interface()` - ABC cannot be instantiated
+  - **IMPL**: Create `lib/json_schema_core/storage/storage_interface.py`
+    - Class: `StorageInterface(ABC)`
+    - Abstract methods: `read_document()`, `write_document()`, `delete_document()`, `list_documents()`, `read_metadata()`, `write_metadata()`
+  - **Acceptance**: Test passes
+  - **Commit**: `"feat(storage): add StorageInterface ABC with tests"`
+
+- [ ] **P0.2.2** Write test + impl: FileSystemStorage - write_document
+  - **TEST**: Create `tests/lib/storage/test_file_storage.py`
+    - Test: `test_write_document_creates_file(tmp_path)` - Write JSON document
+    - Test: `test_write_document_atomic(tmp_path)` - Uses temp file + rename
+  - **IMPL**: Create `lib/json_schema_core/storage/file_storage.py`
+    - Class: `FileSystemStorage(StorageInterface)`
+    - Method: `__init__(self, base_path: Path)`
+    - Method: `write_document(self, doc_id: str, content: dict) -> None`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(storage): implement write_document with atomic writes"`
+
+- [ ] **P0.2.3** Write test + impl: FileSystemStorage - read_document
+  - **TEST**: Add to `tests/lib/storage/test_file_storage.py`
+    - Test: `test_read_document_returns_content(tmp_path)` - Read written document
+    - Test: `test_read_document_raises_not_found(tmp_path)` - Missing file raises error
+  - **IMPL**: Update `lib/json_schema_core/storage/file_storage.py`
+    - Method: `read_document(self, doc_id: str) -> dict`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(storage): implement read_document with error handling"`
+
+- [ ] **P0.2.4** Write test + impl: FileSystemStorage - metadata operations
+  - **TEST**: Add to `tests/lib/storage/test_file_storage.py`
+    - Test: `test_write_metadata(tmp_path)` - Write metadata JSON
+    - Test: `test_read_metadata(tmp_path)` - Read metadata JSON
+    - Test: `test_read_metadata_missing_returns_none(tmp_path)` - No file = None
+  - **IMPL**: Update `lib/json_schema_core/storage/file_storage.py`
+    - Method: `write_metadata(self, doc_id: str, metadata: dict) -> None`
+    - Method: `read_metadata(self, doc_id: str) -> dict | None`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(storage): add metadata read/write operations"`
+
+- [ ] **P0.2.5** Write test + impl: FileSystemStorage - list_documents
+  - **TEST**: Add to `tests/lib/storage/test_file_storage.py`
+    - Test: `test_list_documents_empty(tmp_path)` - Empty storage returns []
+    - Test: `test_list_documents_returns_doc_ids(tmp_path)` - Returns list of IDs
+    - Test: `test_list_documents_pagination(tmp_path)` - Limit/offset work
+  - **IMPL**: Update `lib/json_schema_core/storage/file_storage.py`
+    - Method: `list_documents(self, limit: int = 100, offset: int = 0) -> list[str]`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(storage): implement list_documents with pagination"`
+
+- [ ] **P0.2.6** Write test + impl: FileSystemStorage - delete_document
+  - **TEST**: Add to `tests/lib/storage/test_file_storage.py`
+    - Test: `test_delete_document_removes_file(tmp_path)` - File deleted
+    - Test: `test_delete_document_removes_metadata(tmp_path)` - Metadata deleted
+    - Test: `test_delete_document_missing_is_ok(tmp_path)` - Idempotent
+  - **IMPL**: Update `lib/json_schema_core/storage/file_storage.py`
+    - Method: `delete_document(self, doc_id: str) -> None`
+  - **Acceptance**: Tests pass, FileSystemStorage complete
+  - **Commit**: `"feat(storage): implement delete_document"`
+
+---
+
+### 0.3 Utility Layer - JSONPointer & ULID [~45 minutes]
+
+**Goal**: Build utility functions needed by DocumentService
+
+- [ ] **P0.3.1** Write test + impl: JSONPointer - parse and resolve
+  - **TEST**: Create `tests/lib/utils/test_json_pointer.py`
+    - Test: `test_parse_pointer()` - Parse "/title" into ["title"]
+    - Test: `test_parse_nested_pointer()` - Parse "/sections/0/paragraphs/1"
+    - Test: `test_resolve_pointer()` - Get value from document
+    - Test: `test_resolve_pointer_not_found()` - Raises PathNotFoundError
+  - **IMPL**: Create `lib/json_schema_core/utils/json_pointer.py`
+    - Function: `parse_pointer(pointer: str) -> list[str]`
+    - Function: `resolve_pointer(document: dict, pointer: str) -> Any`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(utils): add JSONPointer resolution with tests"`
+
+- [ ] **P0.3.2** Write test + impl: JSONPointer - set and delete
+  - **TEST**: Add to `tests/lib/utils/test_json_pointer.py`
+    - Test: `test_set_pointer()` - Update value at pointer
+    - Test: `test_set_pointer_creates_path()` - Create missing intermediate objects
+    - Test: `test_delete_pointer()` - Remove value at pointer
+  - **IMPL**: Update `lib/json_schema_core/utils/json_pointer.py`
+    - Function: `set_pointer(document: dict, pointer: str, value: Any) -> dict`
+    - Function: `delete_pointer(document: dict, pointer: str) -> dict`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(utils): add JSONPointer set/delete operations"`
+
+---
+
+### 0.4 Service Layer - ValidationService [~30 minutes]
+
+**Goal**: Build ValidationService before DocumentService depends on it
+
+- [ ] **P0.4.1** Write test + impl: ValidationService - validate document
+  - **TEST**: Create `tests/lib/services/test_validation_service.py`
+    - Test: `test_validate_valid_document()` - Returns True for valid doc
+    - Test: `test_validate_invalid_document()` - Raises ValidationFailedError
+    - Test: `test_validation_error_details()` - Error has validation details
+  - **IMPL**: Create `lib/json_schema_core/services/validation_service.py`
+    - Class: `ValidationService`
+    - Method: `__init__(self, schema: dict)`
+    - Method: `validate(self, document: dict) -> None` (raises on failure)
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): add ValidationService with tests"`
+
+- [ ] **P0.4.2** Write test + impl: ValidationService - apply defaults
+  - **TEST**: Add to `tests/lib/services/test_validation_service.py`
+    - Test: `test_apply_defaults_adds_missing_fields()` - Adds default values
+    - Test: `test_apply_defaults_keeps_provided_values()` - Doesn't override
+  - **IMPL**: Update `lib/json_schema_core/services/validation_service.py`
+    - Method: `apply_defaults(self, document: dict) -> dict`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): add apply_defaults to ValidationService"`
+
+---
+
+### 0.5 Service Layer - SchemaService [~20 minutes]
+
+**Goal**: Build SchemaService to load schemas
+
+- [ ] **P0.5.1** Write test + impl: SchemaService - load schema
+  - **TEST**: Create `tests/lib/services/test_schema_service.py`
+    - Test: `test_load_schema_from_file()` - Load text.json schema
+    - Test: `test_load_schema_caches()` - Doesn't reload every time
+    - Test: `test_load_schema_not_found()` - Raises error for missing schema
+  - **IMPL**: Create `lib/json_schema_core/services/schema_service.py`
+    - Class: `SchemaService`
+    - Method: `__init__(self, schema_dir: Path)`
+    - Method: `load_schema(self, schema_name: str) -> dict`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): add SchemaService with tests"`
+
+**🎯 Phase 0 Complete When:**
+- ✅ All domain models implemented with tests
+- ✅ FileSystemStorage fully implemented with tests
+- ✅ JSONPointer utilities implemented with tests
+- ✅ ValidationService and SchemaService implemented with tests
+- ✅ **All tests passing, 100% coverage**
+- ✅ Can run `pytest tests/lib/` and see ALL GREEN
+- ✅ Ready to build DocumentService in Phase 1 (it now has all dependencies)
+
+---
+
+## Phase 1: DocumentService Implementation [Day 2-3, ~8 hours]
+
+**Goal**: Build DocumentService with ALL dependencies already implemented and tested in Phase 0
+
+**Prerequisite**: Phase 0 complete - we have:
+- ✅ Domain models (DocumentId, DocumentMetadata, errors)
+- ✅ FileSystemStorage (full CRUD + metadata)
+- ✅ JSONPointer utilities
+- ✅ ValidationService (validate + apply_defaults)
+- ✅ SchemaService (load schema)
+
+**Approach**: Write test + implementation for each DocumentService method
+
+---
+
+### 1.1 DocumentService - create_document [~1.5 hours]
+
+### 1.1 DocumentService - create_document [~1.5 hours]
+
+- [ ] **P1.1.1** Write test: create_document with valid data
+  - **TEST**: Create `tests/lib/services/test_document_service.py`
+    - Test: `test_create_document_success()` - Creates doc, returns doc_id + version
+    - Test: `test_create_document_generates_ulid()` - Doc ID is valid ULID
+    - Test: `test_create_document_version_is_one()` - Initial version = 1
+    - Test: `test_create_document_saves_to_storage()` - Calls storage.write_document()
+  - **Acceptance**: Tests written and FAIL
+  - **Commit**: `"test(services): add create_document tests (failing)"`
+
+- [ ] **P1.1.2** Implement: DocumentService.create_document()
+  - **IMPL**: Create `lib/json_schema_core/services/document_service.py`
+    - Class: `DocumentService`
+    - Method: `__init__(self, storage, validation_service, schema_service)`
+    - Method: `async def create_document(self, schema_name: str, content: dict) -> tuple[str, int]`
+      - Generate new DocumentId
+      - Apply schema defaults via ValidationService
+      - Validate document via ValidationService
+      - Create DocumentMetadata (version=1)
+      - Write document to storage
+      - Write metadata to storage
+      - Return (doc_id, version)
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): implement DocumentService.create_document()"`
+
+---
+
+### 1.2 DocumentService - read_node [~1.5 hours]
+
+- [ ] **P1.2.1** Write test: read_node with various paths
+  - **TEST**: Add to `tests/lib/services/test_document_service.py`
+    - Test: `test_read_node_root()` - Read "/" returns full document
+    - Test: `test_read_node_field()` - Read "/title" returns string
+    - Test: `test_read_node_nested()` - Read "/sections/0/title" works
+    - Test: `test_read_node_array_element()` - Read "/authors/1" works
+    - Test: `test_read_node_not_found()` - Raises PathNotFoundError
+    - Test: `test_read_node_returns_version()` - Returns correct version
+  - **Acceptance**: Tests written and FAIL
+  - **Commit**: `"test(services): add read_node tests (failing)"`
+
+- [ ] **P1.2.2** Implement: DocumentService.read_node()
+  - **IMPL**: Update `lib/json_schema_core/services/document_service.py`
+    - Method: `async def read_node(self, doc_id: str, node_path: str) -> tuple[Any, int]`
+      - Load document from storage (raise DocumentNotFoundError if missing)
+      - Load metadata from storage
+      - Use JSONPointer to resolve path
+      - Return (value, version)
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): implement DocumentService.read_node()"`
+
+---
+
+### 1.3 DocumentService - update_node [~2 hours]
+
+- [ ] **P1.3.1** Write test: update_node with validation and versioning
+  - **TEST**: Add to `tests/lib/services/test_document_service.py`
+    - Test: `test_update_node_success()` - Updates value, increments version
+    - Test: `test_update_node_validates()` - Rejects invalid data
+    - Test: `test_update_node_version_conflict()` - Raises VersionConflictError
+    - Test: `test_update_node_updates_timestamp()` - Updates updated_at
+    - Test: `test_update_node_path_not_found()` - Raises PathNotFoundError
+  - **Acceptance**: Tests written and FAIL
+  - **Commit**: `"test(services): add update_node tests (failing)"`
+
+- [ ] **P1.3.2** Implement: DocumentService.update_node()
+  - **IMPL**: Update `lib/json_schema_core/services/document_service.py`
+    - Method: `async def update_node(self, doc_id: str, node_path: str, value: Any, expected_version: int) -> tuple[Any, int]`
+      - Load document and metadata
+      - Check version matches expected_version (raise VersionConflictError if not)
+      - Use JSONPointer to update path
+      - Validate updated document
+      - Increment version in metadata
+      - Write document and metadata
+      - Return (value, new_version)
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): implement DocumentService.update_node()"`
+
+---
+
+### 1.4 DocumentService - create_node [~1.5 hours]
+
+- [ ] **P1.4.1** Write test: create_node (add to array/object)
+  - **TEST**: Add to `tests/lib/services/test_document_service.py`
+    - Test: `test_create_node_append_to_array()` - Adds to "/sections"
+    - Test: `test_create_node_validates()` - Rejects invalid data
+    - Test: `test_create_node_increments_version()` - Version++
+    - Test: `test_create_node_version_conflict()` - Checks version
+  - **Acceptance**: Tests written and FAIL
+  - **Commit**: `"test(services): add create_node tests (failing)"`
+
+- [ ] **P1.4.2** Implement: DocumentService.create_node()
+  - **IMPL**: Update `lib/json_schema_core/services/document_service.py`
+    - Method: `async def create_node(self, doc_id: str, node_path: str, value: Any, expected_version: int) -> tuple[str, int]`
+      - Load document and metadata
+      - Check version
+      - Use JSONPointer to insert value (append to array or add to object)
+      - Validate updated document
+      - Increment version
+      - Write document and metadata
+      - Return (created_path, new_version)
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): implement DocumentService.create_node()"`
+
+---
+
+### 1.5 DocumentService - delete_node [~1.5 hours]
+
+- [ ] **P1.5.1** Write test: delete_node
+  - **TEST**: Add to `tests/lib/services/test_document_service.py`
+    - Test: `test_delete_node_from_array()` - Removes from array
+    - Test: `test_delete_node_from_object()` - Removes field
+    - Test: `test_delete_node_validates()` - Validates result
+    - Test: `test_delete_node_increments_version()` - Version++
+    - Test: `test_delete_node_not_found()` - Raises PathNotFoundError
+  - **Acceptance**: Tests written and FAIL
+  - **Commit**: `"test(services): add delete_node tests (failing)"`
+
+- [ ] **P1.5.2** Implement: DocumentService.delete_node()
+  - **IMPL**: Update `lib/json_schema_core/services/document_service.py`
+    - Method: `async def delete_node(self, doc_id: str, node_path: str, expected_version: int) -> tuple[Any, int]`
+      - Load document and metadata
+      - Check version
+      - Use JSONPointer to delete path
+      - Validate updated document
+      - Increment version
+      - Write document and metadata
+      - Return (deleted_value, new_version)
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): implement DocumentService.delete_node()"`
+
+---
+
+### 1.6 DocumentService - list_documents [~1 hour]
+
+- [ ] **P1.6.1** Write test: list_documents with pagination
+  - **TEST**: Add to `tests/lib/services/test_document_service.py`
+    - Test: `test_list_documents_empty()` - Returns []
+    - Test: `test_list_documents_returns_metadata()` - Returns metadata dicts
+    - Test: `test_list_documents_pagination()` - Limit/offset work
+    - Test: `test_list_documents_sorting()` - Sorted by created_at desc
+  - **Acceptance**: Tests written and FAIL
+  - **Commit**: `"test(services): add list_documents tests (failing)"`
+
+- [ ] **P1.6.2** Implement: DocumentService.list_documents()
+  - **IMPL**: Update `lib/json_schema_core/services/document_service.py`
+    - Method: `async def list_documents(self, limit: int = 100, offset: int = 0) -> list[dict]`
+      - Call storage.list_documents(limit, offset)
+      - Load metadata for each doc_id
+      - Convert to dict format
+      - Return list of metadata dicts
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): implement DocumentService.list_documents()"`
+
+**🎯 Phase 1 Complete When:**
+- ✅ DocumentService fully implemented with ALL CRUD methods
+- ✅ All tests passing for DocumentService
+- ✅ 100% test coverage on DocumentService
+- ✅ Can run `pytest tests/lib/services/test_document_service.py -v` - ALL GREEN
+- ✅ Ready to build interface layers (MCP + REST) in Phase 2
+
+---
+
+## Phase 2: Development Tools & Configuration [Day 3-4, ~6 hours]
+
+**Goal**: Add code quality tools and configuration management
+
+---
+
+### 2.1 Development Tools & Quality [~3 hours]
 
 **Goal**: Add code quality tools and development workflow enhancements
 
 **Note**: Basic project structure and pytest already set up in Phase 0
 
-- [ ] **P1.1.1** Add additional production dependencies to `pyproject.toml`
+**Note**: Basic project structure and pytest already set up in Phase 0
+
+- [ ] **P2.1.1** Add additional production dependencies to `pyproject.toml`
   - Add `mcp` package (Model Context Protocol SDK)
   - Add `fastapi` (REST API framework)
-  - Add `uvicorn` (ASGI server)
+  - Add `uvicorn[standard]` (ASGI server)
   - Update existing dependencies if needed
   - **Acceptance**: All production dependencies listed
+  - **Commit**: `"chore: add MCP and REST API dependencies"`
 
-- [ ] **P1.1.2** Configure Black code formatter
-  - Add Black to dev dependencies
-  - Create `.black` or `pyproject.toml` config section
+- [ ] **P2.1.2** Configure Ruff linter and formatter
+  - Add Ruff to dev dependencies
+  - Create `ruff.toml` config or add to `pyproject.toml`
   - Set line length to 100
-  - **Acceptance**: `black src/ tests/` runs successfully
+  - Enable key rules (F, E, W, I, N)
+  - **Acceptance**: `ruff check lib/ tests/` runs successfully
+  - **Commit**: `"chore: configure Ruff linter"`
 
-- [ ] **P1.1.3** Configure Pylint/Flake8 linter
-  - Add linter to dev dependencies
-  - Create `.pylintrc` or `.flake8` config
-  - Configure max line length and ignored rules
-  - **Acceptance**: `pylint src/` runs without setup errors
-
-- [ ] **P1.1.4** Configure MyPy type checker
+- [ ] **P2.1.3** Configure MyPy type checker
   - Add MyPy to dev dependencies
-  - Create `mypy.ini` or `pyproject.toml` config
+  - Add `[tool.mypy]` section to `pyproject.toml`
   - Enable strict mode
-  - **Acceptance**: `mypy src/` runs successfully
+  - Set Python version to 3.11
+  - **Acceptance**: `mypy lib/` runs successfully
+  - **Commit**: `"chore: configure MyPy type checking"`
 
-- [ ] **P1.1.5** Create virtual environment management script
-  - Create `scripts/setup_env.sh` (Linux/Mac) or `scripts/setup_env.ps1` (Windows)
-  - Include venv creation and dependency installation
-  - **Acceptance**: Script creates working environment
-
-- [ ] **P1.1.6** Set up pre-commit hooks
+- [ ] **P2.1.4** Set up pre-commit hooks
+  - Add `pre-commit` to dev dependencies
   - Create `.pre-commit-config.yaml`
-  - Add hooks for Black, Flake8, MyPy
+  - Add hooks for Ruff, MyPy, pytest
   - **Acceptance**: `pre-commit run --all-files` works
+  - **Commit**: `"chore: add pre-commit hooks"`
 
 ---
 
-### 1.2 Configuration Management [~3 hours]
+### 2.2 Configuration Management [~3 hours]
+
+### 2.2 Configuration Management [~3 hours]
 
 **Goal**: Implement flexible configuration system (FR-001a to FR-001f) in core library
 
-- [ ] **P1.2.1** Create `lib/json_schema_core/config.py` module
-  - Define module structure
-  - Import required dependencies (Pydantic, pathlib, os)
-  - **Acceptance**: Core library config module imports successfully
+- [ ] **P2.2.1** Write test + impl: ServerConfig with Pydantic
+  - **TEST**: Create `tests/lib/test_config.py`
+    - Test: `test_config_defaults()` - Can create with defaults
+    - Test: `test_config_from_dict()` - Load from dict
+    - Test: `test_config_validation()` - Validates types
+  - **IMPL**: Create `lib/json_schema_core/config.py`
+    - Class: `ServerConfig(BaseSettings)` from Pydantic
+    - Fields: `schema_path: Path`, `storage_dir: Path`, `lock_timeout: int`, `server_name: str`
+    - Defaults: schema_path="./schemas", storage_dir="./storage", lock_timeout=30, server_name="json-schema-server"
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(config): add ServerConfig with Pydantic validation"`
 
-- [ ] **P1.2.2** Implement `ServerConfig` class with Pydantic BaseSettings
-  - Define fields: `schema_path`, `storage_dir`, `lock_timeout`, `server_name`
-  - Add type annotations for all fields
-  - Set default values
-  - **Acceptance**: Can instantiate `ServerConfig()` with defaults
+- [ ] **P2.2.2** Write test + impl: Configuration file loading
+  - **TEST**: Add to `tests/lib/test_config.py`
+    - Test: `test_load_from_json(tmp_path)` - Load from JSON file
+    - Test: `test_load_from_missing_file()` - Handles missing file gracefully
+  - **IMPL**: Update `lib/json_schema_core/config.py`
+    - Method: `@classmethod def from_file(cls, path: Path) -> ServerConfig`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(config): add JSON file loading"`
 
-- [ ] **P1.2.3** Add configuration file loading (JSON format)
-  - Implement `load_from_file(path: Path)` class method
-  - Parse JSON configuration file
-  - Handle file not found gracefully
-  - **Acceptance**: Loads valid config.json successfully
+- [ ] **P2.2.3** Write test + impl: Environment variable override
+  - **TEST**: Add to `tests/lib/test_config.py`
+    - Test: `test_env_var_override(monkeypatch)` - Env vars override defaults
+    - Test: `test_env_var_prefix()` - Uses JSON_SCHEMA_ prefix
+  - **IMPL**: Update `lib/json_schema_core/config.py`
+    - Use Pydantic's `model_config` with `env_prefix="JSON_SCHEMA_"`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(config): add environment variable support"`
 
-- [ ] **P1.2.4** Implement configuration precedence: env vars → config file → defaults
-  - Check environment variables first (e.g., `JSON_SCHEMA_PATH`)
-  - Fall back to config file values
-  - Use defaults if neither present
-  - **Acceptance**: Environment variables override config file
-
-- [ ] **P1.2.5** Add configuration validation
-  - Validate `schema_path` exists and is readable
-  - Validate `storage_dir` is writable (create if needed)
-  - Validate `lock_timeout` is positive integer
-  - **Acceptance**: Raises clear error for invalid config
-
-- [ ] **P1.2.6** Create `config.example.json` template
-  - Include all configuration options with comments
+- [ ] **P2.2.4** Create config.example.json template
+  - Create `config.example.json` in repository root
+  - Include all configuration options with comments (JSON doesn't support comments, so use descriptive keys)
   - Provide sensible example values
-  - Add to repository root
-  - **Acceptance**: Example file loads without errors
+  - **Acceptance**: Example file is valid JSON
+  - **Commit**: `"docs: add config.example.json template"`
 
-- [ ] **P1.2.7** Write unit tests for config module
-  - Test default values
-  - Test file loading
-  - Test environment variable override
-  - Test validation errors
-  - **Acceptance**: `pytest tests/lib/test_config.py` passes
-
----
-
-### 1.3 Domain Models - Full Implementation [~3.5 hours]
-
-**Goal**: Complete domain entities and value objects (FR-010, FR-107-111)
-
-**Note**: Basic stubs created in Phase 0.4; now we implement them fully
-
-- [ ] **P1.3.1** Implement full `DocumentId` value object (enhance Phase 0 stub)
-  - Add ULID string validation (reject invalid format)
-  - Add `__str__()` and `__repr__()` methods
-  - Add equality comparison and hashing
-  - Validate ULID format on construction
-  - **Acceptance**: Rejects invalid ULID strings, passes validation tests
-
-- [ ] **P1.3.2** Implement `Document` entity class
-  - Fields: `doc_id: DocumentId`, `content: dict`, `version: int`
-  - Add `to_dict()` serialization method
-  - Add `from_dict()` deserialization class method
-  - **Acceptance**: Can serialize/deserialize document
-
-- [ ] **P1.3.3** Implement full `DocumentMetadata` entity class (enhance Phase 0 stub)
-  - Fields: `doc_id: DocumentId`, `version: int`, `created_at: datetime`, `updated_at: datetime`
-  - Add `to_dict()` serialization with ISO 8601 timestamps
-  - Add `from_dict()` deserialization class method
-  - **Acceptance**: Metadata serializes to JSON-compatible dict
-
-- [ ] **P1.3.4** Implement full `ValidationError` domain model (enhance Phase 0 stub)
-  - Fields: `path: str`, `message: str`, `schema_path: str`
-  - Add `to_dict()` for API responses
-  - **Acceptance**: Can represent validation errors properly
-
-- [ ] **P1.3.5** Create `ValidationReport` domain model
-  - Fields: `valid: bool`, `errors: list[ValidationError]`
-  - Add `to_dict()` serialization
-  - Add convenience methods (`is_valid()`, `error_count()`)
-  - **Acceptance**: Can collect multiple validation errors
-
-- [ ] **P1.3.6** Write unit tests for domain models
-  - Test DocumentId validation (enhance Phase 0 tests)
-  - Test Document serialization
-  - Test Metadata serialization with dates
-  - Test ValidationReport functionality
-  - **Acceptance**: `pytest tests/lib/test_models.py` passes
+**🎯 Phase 2 Complete When:**
+- ✅ Code quality tools configured (Ruff, MyPy, pre-commit)
+- ✅ ServerConfig implemented with tests
+- ✅ Configuration supports files + env vars + defaults
+- ✅ All tests passing
+- ✅ Ready to build interface layers
 
 ---
 
-### 1.4 JSON Pointer Implementation [~5 hours]
+## Phase 3: MCP Interface Layer [Day 5-6, ~8 hours]
 
-**Goal**: RFC 6901 compliant JSON Pointer operations (FR-021 to FR-025)
+**Goal**: Build MCP server as thin adapter calling DocumentService
 
-- [ ] **P1.4.1** Create `lib/json_schema_core/utils/json_pointer.py` module
-  - Set up module structure
-  - Import dependencies (typing, json)
-  - **Acceptance**: Module imports successfully
+**Prerequisites**: Phase 1 complete - DocumentService fully implemented
 
-- [ ] **P1.4.2** Implement `JSONPointer` value object class
-  - Parse pointer string (e.g., "/foo/bar/0")
-  - Store as list of tokens
+---
+
+### 3.1 MCP Server Setup [~2 hours]
+
+- [ ] **P3.1.1** Create MCP server directory structure
+  - Create `apps/mcp_server/` with `__init__.py`
+  - Create `apps/mcp_server/tools/` with `__init__.py`
+  - Create `tests/apps/mcp_server/` with `__init__.py`
+  - **Acceptance**: Directory structure exists
+  - **Commit**: `"chore: create MCP server directory structure"`
+
+- [ ] **P3.1.2** Write test + impl: MCP server initialization
+  - **TEST**: Create `tests/apps/mcp_server/test_server.py`
+    - Test: `test_server_init()` - Can create server instance
+    - Test: `test_server_has_config()` - Loads configuration
+  - **IMPL**: Create `apps/mcp_server/server.py`
+    - Class: `MCPServer`
+    - Method: `__init__(self, config: ServerConfig)`
+    - Initialize MCP server from SDK
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): initialize MCP server"`
+
+- [ ] **P3.1.3** Write test + impl: Service dependency injection
+  - **TEST**: Add to `tests/apps/mcp_server/test_server.py`
+    - Test: `test_server_creates_services()` - Initializes DocumentService, etc.
+  - **IMPL**: Update `apps/mcp_server/server.py`
+    - Initialize FileSystemStorage
+    - Initialize ValidationService, SchemaService
+    - Initialize DocumentService with dependencies
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): add service dependency injection"`
+
+---
+
+### 3.2 MCP Tools - Document CRUD [~4 hours]
+
+- [ ] **P3.2.1** Write test + impl: document_create tool
+  - **TEST**: Create `tests/apps/mcp_server/test_document_tools.py`
+    - Test: `test_document_create_success()` - Calls DocumentService.create_document()
+    - Test: `test_document_create_validation_error()` - Returns error response
+  - **IMPL**: Create `apps/mcp_server/tools/document_tools.py`
+    - Function: `@mcp_tool async def document_create(schema_name: str, content: dict) -> dict`
+    - Call: `document_service.create_document(schema_name, content)`
+    - Return: `{"doc_id": str, "version": int}`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): implement document_create tool"`
+
+- [ ] **P3.2.2** Write test + impl: document_read_node tool
+  - **TEST**: Add to `tests/apps/mcp_server/test_document_tools.py`
+    - Test: `test_document_read_node_success()` - Returns node content
+    - Test: `test_document_read_node_not_found()` - Returns error
+  - **IMPL**: Update `apps/mcp_server/tools/document_tools.py`
+    - Function: `@mcp_tool async def document_read_node(doc_id: str, node_path: str) -> dict`
+    - Call: `document_service.read_node(doc_id, node_path)`
+    - Return: `{"content": Any, "version": int}`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): implement document_read_node tool"`
+
+- [ ] **P3.2.3** Write test + impl: document_update_node tool
+  - **TEST**: Add to `tests/apps/mcp_server/test_document_tools.py`
+    - Test: `test_document_update_node_success()` - Updates and returns new version
+    - Test: `test_document_update_node_version_conflict()` - Returns conflict error
+  - **IMPL**: Update `apps/mcp_server/tools/document_tools.py`
+    - Function: `@mcp_tool async def document_update_node(doc_id: str, node_path: str, value: Any, expected_version: int) -> dict`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): implement document_update_node tool"`
+
+- [ ] **P3.2.4** Write test + impl: document_create_node tool
+  - **TEST**: Add to `tests/apps/mcp_server/test_document_tools.py`
+    - Test: `test_document_create_node_success()` - Creates and returns path
+  - **IMPL**: Update `apps/mcp_server/tools/document_tools.py`
+    - Function: `@mcp_tool async def document_create_node(...)`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): implement document_create_node tool"`
+
+- [ ] **P3.2.5** Write test + impl: document_delete_node tool
+  - **TEST**: Add to `tests/apps/mcp_server/test_document_tools.py`
+  - **IMPL**: Update `apps/mcp_server/tools/document_tools.py`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): implement document_delete_node tool"`
+
+- [ ] **P3.2.6** Write test + impl: document_list tool
+  - **TEST**: Add to `tests/apps/mcp_server/test_document_tools.py`
+  - **IMPL**: Update `apps/mcp_server/tools/document_tools.py`
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(mcp): implement document_list tool"`
+
+---
+
+### 3.3 MCP Server Entry Point [~2 hours]
+
+- [ ] **P3.3.1** Create __main__.py for MCP server
+  - Create `apps/mcp_server/__main__.py`
+  - Load configuration
+  - Initialize server
+  - Start MCP server (stdio transport)
+  - **Acceptance**: Can run `python -m apps.mcp_server`
+  - **Commit**: `"feat(mcp): add server entry point"`
+
+- [ ] **P3.3.2** Create integration test for MCP server
+  - **TEST**: Create `tests/apps/mcp_server/test_integration.py`
+    - Test: `test_full_document_lifecycle()` - Create, read, update, delete via MCP tools
+  - **Acceptance**: Integration test passes
+  - **Commit**: `"test(mcp): add integration test"`
+
+**🎯 Phase 3 Complete When:**
+- ✅ MCP server fully functional
+- ✅ All document CRUD tools implemented
+- ✅ All tests passing
+- ✅ Can run MCP server: `python -m apps.mcp_server`
+- ✅ Ready to build REST API interface
+
+---
+
+## Phase 4: REST API Interface Layer [Day 7-8, ~8 hours]
+
+**Goal**: Build REST API as thin adapter calling DocumentService (parallel to MCP)
   - Validate RFC 6901 format
   - **Acceptance**: Parses valid pointers correctly
 
