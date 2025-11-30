@@ -60,14 +60,14 @@ jobs:
         COVERAGE=$(coverage report --format=total 2>/dev/null || echo "0")
         echo "**Total Coverage: ${COVERAGE}%**" >> $GITHUB_STEP_SUMMARY
     
-    - name: Publish test results
-      uses: EnricoMi/publish-unit-test-result-action@v2
-      if: always() && github.event_name == 'pull_request'
-      with:
-        files: pytest-report.xml
-        comment_mode: always
-        compare_to_earlier_commit: true
-        check_name: "Test Results (Python ${{ matrix.python-version }})"
+    # - name: Publish test results
+    #   uses: EnricoMi/publish-unit-test-result-action@v2
+    #   if: always() && github.event_name == 'pull_request'
+    #   with:
+    #     files: pytest-report.xml
+    #     comment_mode: always
+    #     compare_to_earlier_commit: true
+    #     check_name: "Test Results (Python ${{ matrix.python-version }})"
     
     - name: Comment coverage on PR
       if: github.event_name == 'pull_request' && matrix.python-version == '3.11'
