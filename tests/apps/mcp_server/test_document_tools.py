@@ -21,10 +21,10 @@ def test_document_create_success(mcp_server, sample_schema):
 
     # Verify document was actually created
     doc_id = result["doc_id"]
-    content, version = mcp_server.document_service.read_node(
-        schema_id=sample_schema, doc_id=doc_id, node_path="/"
-    )
+    content, version = mcp_server.document_service.read_node(doc_id=doc_id, node_path="/")
     assert version == 1
     # Document should have defaults applied
     assert "tags" in content
     assert content["tags"] == []
+    assert "title" in content
+    assert content["title"] == "Untitled"

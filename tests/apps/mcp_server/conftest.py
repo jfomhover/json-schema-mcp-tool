@@ -33,8 +33,8 @@ def sample_schema(config):
         "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
-            "title": {"type": "string"},
-            "content": {"type": "string"},
+            "title": {"type": "string", "default": "Untitled"},
+            "content": {"type": "string", "default": ""},
             "tags": {"type": "array", "items": {"type": "string"}, "default": []},
         },
         "required": ["title"],
