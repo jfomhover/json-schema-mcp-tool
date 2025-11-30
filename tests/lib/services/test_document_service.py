@@ -4,14 +4,19 @@ Tests for DocumentService - Document CRUD operations
 import pytest
 from json_schema_core.services.document_service import DocumentService
 from json_schema_core.services.schema_service import SchemaService
+from json_schema_core.services.validation_service import ValidationService
 from json_schema_core.storage.file_storage import FileSystemStorage
 from json_schema_core.domain.errors import ValidationFailedError
 from json_schema_core.domain.document_id import DocumentId
 from json_schema_core.domain.metadata import DocumentMetadata
 import tempfile
 import shutil
+import json
+from pathlib import Path
 from datetime import datetime
 
+
+# P1.0.1: Test Fixtures for DocumentService
 
 @pytest.fixture
 def temp_storage():
@@ -20,6 +25,20 @@ def temp_storage():
     storage = FileSystemStorage(temp_dir)
     yield storage
     shutil.rmtree(temp_dir)
+
+
+@pytest.fixture
+def text_schema():
+    """Load and return the text.json schema"""
+    schema_path = Path(__file__).parent.parent.parent.parent / "schemas" / "text.json"
+    with open(schema_path, "r") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def validation_service(text_schema):
+    """Create a ValidationService with text schema"""
+    return ValidationService(text_schema)
 
 
 @pytest.fixture
@@ -34,21 +53,75 @@ def document_service(temp_storage, schema_service):
     return DocumentService(temp_storage, schema_service)
 
 
+# P1.0.2: Sample Document Fixtures
+
 @pytest.fixture
-def sample_schema(temp_storage):
-    """Create and store a sample schema"""
-    schema_id = DocumentId.generate()
-    schema = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "age": {"type": "integer", "minimum": 0},
-            "email": {"type": "string", "format": "email"}
-        },
-        "required": ["name", "email"]
+def valid_minimal_doc():
+    """Minimal valid text document with required fields only"""
+    return {
+        "title": "Test",
+        "authors": ["Author"],
+        "sections": []
     }
-    temp_storage.write_document(str(schema_id), schema)
-    return str(schema_id), schema
+
+
+@pytest.fixture
+def valid_full_doc():
+    """Complete valid text document with sections and paragraphs"""
+    return {
+        "title": "Complete Document",
+        "authors": ["First Author", "Second Author"],
+        "sections": [
+            {
+                "title": "Introduction",
+                "paragraphs": [
+                    "This is the first paragraph of the introduction.",
+                    "This is the second paragraph with more details."
+                ]
+            },
+            {
+                "title": "Main Content",
+                "paragraphs": [
+                    "Here we discuss the main topic.",
+                    "Additional information follows.",
+                    "And even more content here."
+                ]
+            },
+            {
+                "title": "Conclusion",
+                "paragraphs": [
+                    "Final thoughts and summary."
+                ]
+            }
+        ]
+    }
+
+
+@pytest.fixture
+def invalid_doc_missing_title():
+    """Invalid document - missing required 'title' field"""
+    return {
+        "authors": ["Author"],
+        "sections": []
+    }
+
+
+@pytest.fixture
+def invalid_doc_wrong_type():
+    """Invalid document - wrong type for 'authors' field"""
+    return {
+        "title": "Test",
+        "authors": "Single Author String",  # Should be array
+        "sections": []
+    }
+
+
+@pytest.fixture
+def sample_schema(temp_storage, text_schema):
+    """Create and store the text.json schema"""
+    schema_id = DocumentId.generate()
+    temp_storage.write_document(str(schema_id), text_schema)
+    return str(schema_id), text_schema
 
 
 # P1.1.1: Basic Document Creation
@@ -57,9 +130,14 @@ def test_create_document_with_valid_data(document_service, sample_schema):
     """Test creating a document with valid data"""
     schema_id, _ = sample_schema
     document = {
-        "name": "John Doe",
-        "age": 30,
-        "email": "john@example.com"
+        "title": "Test Document",
+        "authors": ["John Doe"],
+        "sections": [
+            {
+                "title": "Introduction",
+                "paragraphs": ["This is a test paragraph."]
+            }
+        ]
     }
     
     doc_id, metadata = document_service.create_document(schema_id, document)
@@ -82,9 +160,9 @@ def test_create_document_validation_failure(document_service, sample_schema):
     """Test that validation failure prevents document creation"""
     schema_id, _ = sample_schema
     invalid_document = {
-        "name": "John Doe",
-        # Missing required "email" field
-        "age": -5  # Invalid: age must be >= 0
+        "title": "Test",
+        "authors": [],  # Invalid: minItems is 1
+        "sections": []
     }
     
     with pytest.raises(ValidationFailedError):
@@ -95,8 +173,9 @@ def test_create_document_metadata_correct(document_service, sample_schema):
     """Test that metadata is created correctly"""
     schema_id, _ = sample_schema
     document = {
-        "name": "Jane Smith",
-        "email": "jane@example.com"
+        "title": "Metadata Test",
+        "authors": ["Jane Smith"],
+        "sections": []
     }
     
     doc_id, metadata = document_service.create_document(schema_id, document)
@@ -114,8 +193,9 @@ def test_create_document_id_is_ulid(document_service, sample_schema):
     """Test that document ID is in ULID format"""
     schema_id, _ = sample_schema
     document = {
-        "name": "Test User",
-        "email": "test@example.com"
+        "title": "ULID Test",
+        "authors": ["Test User"],
+        "sections": []
     }
     
     doc_id, _ = document_service.create_document(schema_id, document)
@@ -131,8 +211,9 @@ def test_create_document_atomic_storage(document_service, sample_schema, temp_st
     """Test that document and metadata are stored atomically"""
     schema_id, _ = sample_schema
     document = {
-        "name": "Atomic Test",
-        "email": "atomic@example.com"
+        "title": "Atomic Test",
+        "authors": ["Atomic Author"],
+        "sections": []
     }
     
     doc_id, _ = document_service.create_document(schema_id, document)
@@ -143,7 +224,7 @@ def test_create_document_atomic_storage(document_service, sample_schema, temp_st
     
     assert stored_doc is not None
     assert stored_meta is not None
-    assert stored_doc["name"] == "Atomic Test"
+    assert stored_doc["title"] == "Atomic Test"
     assert stored_meta["doc_id"] == doc_id
     assert stored_meta["version"] == 1
 
@@ -155,8 +236,9 @@ def test_create_document_with_custom_id(document_service, sample_schema, temp_st
     schema_id, _ = sample_schema
     custom_id = str(DocumentId.generate())
     document = {
-        "name": "Custom ID Test",
-        "email": "custom@example.com"
+        "title": "Custom ID Test",
+        "authors": ["Custom Author"],
+        "sections": []
     }
     
     doc_id, metadata = document_service.create_document(schema_id, document, doc_id=custom_id)
@@ -167,7 +249,7 @@ def test_create_document_with_custom_id(document_service, sample_schema, temp_st
     
     # Document should be stored with custom ID
     stored_doc = temp_storage.read_document(custom_id)
-    assert stored_doc["name"] == "Custom ID Test"
+    assert stored_doc["title"] == "Custom ID Test"
 
 
 def test_create_document_custom_id_already_exists(document_service, sample_schema, temp_storage):
@@ -177,15 +259,17 @@ def test_create_document_custom_id_already_exists(document_service, sample_schem
     # Create first document
     custom_id = str(DocumentId.generate())
     document1 = {
-        "name": "First Document",
-        "email": "first@example.com"
+        "title": "First Document",
+        "authors": ["First Author"],
+        "sections": []
     }
     document_service.create_document(schema_id, document1, doc_id=custom_id)
     
     # Try to create second document with same ID
     document2 = {
-        "name": "Second Document",
-        "email": "second@example.com"
+        "title": "Second Document",
+        "authors": ["Second Author"],
+        "sections": []
     }
     
     with pytest.raises(ValueError, match="already exists"):
@@ -196,8 +280,9 @@ def test_create_document_custom_id_must_be_valid(document_service, sample_schema
     """Test that custom ID must be valid format"""
     schema_id, _ = sample_schema
     document = {
-        "name": "Test",
-        "email": "test@example.com"
+        "title": "Test",
+        "authors": ["Test Author"],
+        "sections": []
     }
     
     # Try with invalid ID (not ULID format)
