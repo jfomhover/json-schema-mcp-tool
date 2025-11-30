@@ -66,7 +66,7 @@ def document_service(config, sample_schema):
 
     service = DocumentService(storage, schema_service)
 
-    return service
+    return service, schema_service
 
 
 @pytest.fixture
@@ -74,4 +74,6 @@ def mcp_server(document_service):
     """Return MCP server instance for tests."""
     from apps.mcp_server.server import MCPServer
 
-    return MCPServer(document_service)
+    doc_service, schema_service = document_service
+    return MCPServer(doc_service, schema_service)
+
