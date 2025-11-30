@@ -4,7 +4,6 @@ Tests for DocumentService - Document CRUD operations
 import pytest
 from json_schema_core.services.document_service import DocumentService
 from json_schema_core.services.schema_service import SchemaService
-from json_schema_core.services.validation_service import ValidationService
 from json_schema_core.storage.file_storage import FileSystemStorage
 from json_schema_core.domain.errors import ValidationFailedError
 from json_schema_core.domain.document_id import DocumentId
