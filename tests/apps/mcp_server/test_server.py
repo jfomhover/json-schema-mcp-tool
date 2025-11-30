@@ -20,3 +20,10 @@ def test_server_has_services(mcp_server):
 
     assert hasattr(mcp_server, "document_service")
     assert isinstance(mcp_server.document_service, DocumentService)
+
+
+def test_server_registers_tools(mcp_server):
+    """Test that server registers MCP tools."""
+    # For now, just check that the server has a list_tools method
+    # We'll verify specific tools once they're implemented
+    assert hasattr(mcp_server.server, "list_tools")
