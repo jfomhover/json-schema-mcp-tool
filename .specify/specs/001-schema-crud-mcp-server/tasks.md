@@ -23,8 +23,9 @@
 
 ## Task Overview
 
-**Total Phases**: 8 (includes Phase 0: TDD Bootstrap)  
-**Estimated Duration**: 6-7 weeks  
+**Total Phases**: 5 (Phases 0-4)  
+**Full Estimated Duration**: ~46 hours  
+**MVP Estimated Duration**: ~30 hours (35% reduction)  
 **Task Categories**: Setup, Infrastructure, Services, Interfaces, Testing, Documentation, Polish
 
 **Development Approach**: Test-Driven Development (TDD)
@@ -32,6 +33,56 @@
 - Run tests (expecting failures)
 - Implement code to make tests pass
 - Refactor while keeping tests green
+
+---
+
+## 🎯 MVP SCOPE
+
+**MVP Timeline**: ~30 hours (vs 46 hours full scope)
+
+### **Sections Marked `[MVP-DEFER]`** (16 hours deferred):
+
+**Phase 0 Deferrals** (~50 min):
+- 0.6 Schema Loading and Validation - Use hard-coded schema for MVP
+
+**Phase 1 Simplifications** (~1.5 hours):
+- 1.11 LockService - Simplified to basic in-memory locks (merged into 1.6)
+
+**Phase 2 Deferrals** (~6.5 hours):
+- 2.2 Configuration File Loading - Use defaults
+- 2.3 Configuration Environment Variables - Use defaults
+- 2.4 Configuration Validation - Basic validation only
+- 2.5 Configuration Documentation - Defer docs
+- 2.6 Error Code Catalog Documentation - Codes exist, docs deferred
+- 2.8 Development Tools - Type Checking (MyPy)
+- 2.9 Development Tools - Pre-commit Hooks
+
+**Phase 3 Deferrals** (~2.75 hours):
+- 3.10 Schema Introspection Endpoints - User Story 3, post-MVP
+- 3.12 REST API Integration Tests - Unit tests cover core
+
+**Phase 4 Deferrals** (~4.5 hours):
+- 4.8 MCP Tools - SCHEMA Introspection - User Story 3, post-MVP
+- 4.11 MCP Resources - Document Export (document:// URIs)
+- 4.12 MCP Integration Tests - Unit tests cover core
+- 4.13 MCP vs REST Comparison Test - Parity validation, post-MVP
+
+### **MVP Delivers**:
+✅ Full CRUD operations (create, read, update, delete, list)  
+✅ JSON Schema validation with $ref resolution  
+✅ Both MCP and REST interfaces  
+✅ Optimistic locking (basic)  
+✅ File system storage  
+✅ Error handling  
+✅ All core functionality testable
+
+### **Post-MVP Adds**:
+⏳ Schema introspection (User Story 3)  
+⏳ Advanced configuration (files, env vars)  
+⏳ Documentation and error catalogs  
+⏳ Development tooling (MyPy, pre-commit)  
+⏳ Integration and parity tests  
+⏳ MCP resource URIs
 
 ---
 
@@ -371,11 +422,13 @@
 
 ---
 
-### 0.6 Schema Loading and Validation [~30 minutes]
+### 0.6 Schema Loading and Validation [~30 minutes] [MVP-DEFER]
 
 **Goal**: Load and validate schema files from `schemas/` directory at startup
 
-- [ ] **P0.6.1** Test: Load schema files from directory
+**MVP Note**: For MVP, hard-code the schema in SchemaService constructor. This section can be restored post-MVP for multi-schema support.
+
+- [ ] **P0.6.1** Test: Load schema files from directory [MVP-DEFER]
   - **TEST**: `tests/lib/services/test_schema_service_loading.py`
     - Create `TestSchemaLoading` class
     - Test `test_load_all_schemas_from_directory()`:
@@ -392,7 +445,7 @@
   - **Acceptance**: FAIL - SchemaService doesn't have load_schemas() method yet
   - **Commit**: `"test(services): add schema directory loading tests"`
 
-- [ ] **P0.6.2** Implement: Add load_schemas() to SchemaService
+- [ ] **P0.6.2** Implement: Add load_schemas() to SchemaService [MVP-DEFER]
   - **IMPL**: Update `lib/json_schema_core/services/schema_service.py`
     - Add `load_schemas(schemas_dir: Path) -> None` method
     - Read all .json files from directory
@@ -405,7 +458,7 @@
   - **Acceptance**: Tests from P0.6.1 PASS
   - **Commit**: `"feat(services): add schema directory loading to SchemaService"`
 
-- [ ] **P0.6.3** Test: Schema validation at load time
+- [ ] **P0.6.3** Test: Schema validation at load time [MVP-DEFER]
   - **TEST**: Add to `test_schema_service_loading.py`
     - Test `test_schema_with_invalid_json_schema_raises_error()`:
       - Create file with invalid JSON Schema (e.g., wrong type for "type" field)
@@ -416,7 +469,7 @@
   - **Acceptance**: FAIL - No validation yet
   - **Commit**: `"test(services): add schema validation at load time"`
 
-- [ ] **P0.6.4** Implement: Validate schemas at load time
+- [ ] **P0.6.4** Implement: Validate schemas at load time [MVP-DEFER]
   - **IMPL**: Update `SchemaService.load_schemas()`
     - After parsing JSON, validate it's valid JSON Schema
     - Use jsonschema Draft 7 meta-schema for validation
@@ -437,9 +490,11 @@
 - ✅ Can run `pytest tests/lib/` and see ALL GREEN
 - ✅ Ready to build DocumentService in Phase 1 (it now has all dependencies)
 
+**MVP Note**: Section 0.6 (Schema Loading) deferred - hard-code schema in SchemaService for MVP (~50 min saved)
+
 ---
 
-## Phase 1: DocumentService Implementation [Day 2-3, ~10 hours]
+## Phase 1: DocumentService Implementation [Day 2-3, ~10 hours → ~8.5 hours MVP]
 
 **Goal**: Build DocumentService with ALL dependencies already implemented and tested in Phase 0
 
@@ -951,11 +1006,13 @@
 
 ---
 
-### 1.11 LockService - Document-Level Locking [~2 hours]
+### 1.11 LockService - Document-Level Locking [~2 hours] [MVP-SIMPLIFY]
+
+**MVP Note**: Use simple in-memory dictionary for locks. Defer timeout/cleanup logic and separate LockService class. Implement directly in DocumentService for MVP (~1 hour saved, see Phase 1.6 for inline implementation).
 
 **Goal**: Implement document-level optimistic locking with in-memory lock map
 
-- [ ] **P1.11.1** Test: LockService - acquire and release lock
+- [ ] **P1.11.1** Test: LockService - acquire and release lock [MVP-DEFER]
   - **TEST**: Create `tests/lib/services/test_lock_service.py`
     - Test: `test_acquire_lock_success()` - Acquire lock for doc_id
     - Test: `test_release_lock()` - Release acquired lock
@@ -969,7 +1026,7 @@
   - **Acceptance**: Tests pass
   - **Commit**: `"feat(services): add LockService with acquire/release"`
 
-- [ ] **P1.11.2** Test: Lock timeout after 10 seconds
+- [ ] **P1.11.2** Test: Lock timeout after 10 seconds [MVP-DEFER]
   - **TEST**: Add test
     - Test: `test_lock_timeout()` - Lock acquisition fails after 10s
       - Acquire lock in thread 1
@@ -981,7 +1038,7 @@
   - **Acceptance**: Test passes
   - **Commit**: `"feat(services): add 10-second lock timeout"`
 
-- [ ] **P1.11.3** Test: Concurrent operations serialized per document
+- [ ] **P1.11.3** Test: Concurrent operations serialized per document [MVP-DEFER]
   - **TEST**: Add test
     - Test: `test_concurrent_writes_serialized()` - Two writes to same doc serialize
     - Test: `test_concurrent_writes_different_docs()` - Writes to different docs don't block
@@ -991,7 +1048,7 @@
   - **Acceptance**: Tests pass
   - **Commit**: `"feat(services): serialize writes per document only"`
 
-- [ ] **P1.11.4** Test: Lock released on operation completion/failure
+- [ ] **P1.11.4** Test: Lock released on operation completion/failure [MVP-DEFER]
   - **TEST**: Add test
     - Test: `test_lock_released_on_success()` - Lock freed after successful write
     - Test: `test_lock_released_on_error()` - Lock freed even if operation fails
@@ -1001,7 +1058,7 @@
   - **Acceptance**: Tests pass
   - **Commit**: `"feat(services): ensure lock cleanup with context manager"`
 
-- [ ] **P1.11.5** Integrate LockService into DocumentService writes
+- [ ] **P1.11.5** Integrate LockService into DocumentService writes [MVP-DEFER]
   - **TEST**: Add test
     - Test: `test_update_node_acquires_lock(document_service, lock_service)`
       - Mock lock_service
@@ -1015,7 +1072,7 @@
   - **Acceptance**: Tests pass
   - **Commit**: `"feat(services): integrate locking into write operations"`
 
-- [ ] **P1.11.6** Test: Lock timeout returns clear error
+- [ ] **P1.11.6** Test: Lock timeout returns clear error [MVP-DEFER]
   - **TEST**: Add test
     - Test: `test_lock_timeout_error_message(document_service)`
       - Simulate lock timeout scenario
@@ -1029,23 +1086,26 @@
 
 **🎯 Phase 1 Complete When:**
 - ✅ DocumentService fully implemented with ALL CRUD methods
-- ✅ LockService implemented with document-level locking
-- ✅ All unit tests passing (50+ tests)
+- ✅ All unit tests passing (45+ tests)
 - ✅ Integration tests passing
-- ✅ 100% test coverage on DocumentService and LockService
+- ✅ 100% test coverage on DocumentService
 - ✅ Can run `pytest tests/lib/services/test_document_service.py -v` - ALL GREEN
 - ✅ Each method tested for: happy path, error handling, edge cases
-- ✅ Optimistic locking verified with 10-second timeout
-- ✅ Concurrent operations properly serialized per document
+- ✅ Optimistic locking verified with version numbers
+- ✅ Basic concurrency handling (optimistic locking)
 - ✅ Ready to build interface layers (MCP + REST) in Phase 2
+
+**MVP Note**: LockService (1.11) deferred - use simple inline locks in DocumentService (~1 hour saved)
 
 ---
 
-## Phase 2: Configuration Management & Development Tools [Day 3-4, ~8 hours]
+## Phase 2: Configuration Management & Development Tools [Day 3-4, ~8 hours → ~1.5 hours MVP]
 
 **Goal**: Complete configuration system and add code quality tools
 
 **Prerequisites**: Phase 1 complete - DocumentService fully implemented with locking
+
+**MVP Note**: Most configuration features deferred - use defaults and Ruff linting only (~6.5 hours saved)
 
 ---
 
@@ -1107,9 +1167,11 @@
 
 ---
 
-### 2.2 Configuration Management - File Loading [~1.5 hours]
+### 2.2 Configuration Management - File Loading [~1.5 hours] [MVP-DEFER]
 
-- [ ] **P2.2.1** Test: Load config from JSON file
+**MVP Note**: Use default configuration values. File loading can be added post-MVP.
+
+- [ ] **P2.2.1** Test: Load config from JSON file [MVP-DEFER]
   - **TEST**: Add test
     - Test: `test_load_from_json_file(tmp_path)`
       - Create temp JSON file with config
@@ -1163,7 +1225,7 @@
 
 ---
 
-### 2.3 Configuration Management - Environment Variables [~1.5 hours]
+### 2.3 Configuration Management - Environment Variables [~1.5 hours] [MVP-DEFER]
 
 - [ ] **P2.3.1** Test: Environment variables override defaults
   - **TEST**: Add test
@@ -1201,7 +1263,7 @@
 
 ---
 
-### 2.4 Configuration Management - Validation [~1 hour]
+### 2.4 Configuration Management - Validation [~1 hour] [MVP-DEFER]
 
 - [ ] **P2.4.1** Test: Validate schema_path exists
   - **TEST**: Add test
@@ -1255,7 +1317,7 @@
 
 ---
 
-### 2.5 Configuration Management - Documentation [~30 minutes]
+### 2.5 Configuration Management - Documentation [~30 minutes] [MVP-DEFER]
 
 - [ ] **P2.5.1** Create config.example.json template
   - **IMPL**: Create `config.example.json` in repo root
@@ -1275,7 +1337,7 @@
 
 ---
 
-### 2.6 Error Code Catalog Documentation [~1 hour]
+### 2.6 Error Code Catalog Documentation [~1 hour] [MVP-DEFER]
 
 **Goal**: Create exhaustive error code enumeration per FR-096 to FR-100
 
@@ -1342,7 +1404,7 @@
 
 ---
 
-### 2.8 Development Tools - Type Checking [~30 minutes]
+### 2.8 Development Tools - Type Checking [~30 minutes] [MVP-DEFER]
 
 - [ ] **P2.8.1** Configure MyPy type checker
   - **IMPL**: Update `pyproject.toml`
@@ -1363,7 +1425,7 @@
 
 ---
 
-### 2.9 Development Tools - Pre-commit Hooks [~30 minutes]
+### 2.9 Development Tools - Pre-commit Hooks [~30 minutes] [MVP-DEFER]
 
 - [ ] **P2.9.1** Configure pre-commit hooks
   - **IMPL**: 
@@ -1391,12 +1453,14 @@
 
 ---
 
-## Phase 3: REST API Interface Layer [Day 5-7, ~12 hours]
+## Phase 3: REST API Interface Layer [Day 5-7, ~12 hours → ~9.2 hours MVP]
 
 **Goal**: Build REST API as thin adapter calling DocumentService
 
 **Prerequisites**: 
 - Phase 1: DocumentService fully implemented
+
+**MVP Note**: Schema introspection endpoints (3.10) and integration tests (3.12) deferred (~2.75 hours saved)
 - Phase 2: ServerConfig available
 
 **Architecture**: FastAPI application with thin routes that delegate to DocumentService
@@ -1776,11 +1840,13 @@
 
 ---
 
-### 3.10 Schema Introspection Endpoints [~1.5 hours]
+### 3.10 Schema Introspection Endpoints [~1.5 hours] [MVP-DEFER]
+
+**MVP Note**: Schema introspection is User Story 3, deferred for post-MVP. Core CRUD is priority.
 
 **Goal**: Implement schema introspection for User Story 3
 
-- [ ] **P3.10.1** Test: GET /schema/node endpoint
+- [ ] **P3.10.1** Test: GET /schema/node endpoint [MVP-DEFER]
   - **TEST**: Create `tests/apps/rest_api/test_schema.py`
     - Test: `test_get_schema_node_root(client)`
       - GET /schema/node?path=/&dereferenced=true
@@ -1862,9 +1928,11 @@
 
 ---
 
-### 3.12 REST API Integration Tests [~1 hour]
+### 3.12 REST API Integration Tests [~1 hour] [MVP-DEFER]
 
-- [ ] **P3.12.1** Integration test: Full document lifecycle via REST
+**MVP Note**: Unit tests cover core functionality. Integration tests can be added post-MVP.
+
+- [ ] **P3.12.1** Integration test: Full document lifecycle via REST [MVP-DEFER]
   - **TEST**: Create `tests/apps/rest_api/test_integration.py`
     - Test: `test_full_document_lifecycle_rest(client)`
       - POST /documents - create
@@ -1911,7 +1979,7 @@
 
 ---
 
-## Phase 4: MCP Interface Layer [Day 8-10, ~10 hours]
+## Phase 4: MCP Interface Layer [Day 8-10, ~10 hours → ~5.5 hours MVP]
 
 **Goal**: Build MCP server as thin adapter calling DocumentService (parallel to REST API)
 
@@ -1920,6 +1988,8 @@
 - Phase 2: ServerConfig available
 
 **Architecture**: MCP tools that delegate to DocumentService (zero duplication with REST API)
+
+**MVP Note**: Schema introspection tools (4.8), resources (4.11), and integration/parity tests (4.12-4.13) deferred (~4.5 hours saved)
 
 ---
 
@@ -2236,11 +2306,13 @@
 
 ---
 
-### 4.8 MCP Tools - SCHEMA Introspection [~1.5 hours]
+### 4.8 MCP Tools - SCHEMA Introspection [~1.5 hours] [MVP-DEFER]
+
+**MVP Note**: Schema introspection is User Story 3, deferred for post-MVP.
 
 **Goal**: Implement schema introspection tools for User Story 3
 
-- [ ] **P4.8.1** Test: schema_get_node tool
+- [ ] **P4.8.1** Test: schema_get_node tool [MVP-DEFER]
   - **TEST**: Create `tests/apps/mcp_server/test_schema_tools.py`
     - Test: `test_schema_get_node_root(mcp_server)`
       - Call tool: schema_get_node(node_path="/", dereferenced=True)
@@ -2359,7 +2431,7 @@
 
 ---
 
-### 4.11 MCP Resources - Document Export [~1 hour]
+### 4.11 MCP Resources - Document Export [~1 hour] [MVP-DEFER]
 
 **Goal**: Expose documents as MCP resources with URIs for export/linking
 
@@ -2420,7 +2492,7 @@
 
 ---
 
-### 4.12 MCP Integration Tests [~1 hour]
+### 4.12 MCP Integration Tests [~1 hour] [MVP-DEFER]
 
 - [ ] **P4.12.1** Integration test: Full document lifecycle via MCP
   - **TEST**: Create `tests/apps/mcp_server/test_integration.py`
@@ -2451,7 +2523,7 @@
 
 ---
 
-### 4.13 MCP vs REST Comparison Test [~30 minutes]
+### 4.13 MCP vs REST Comparison Test [~30 minutes] [MVP-DEFER]
 
 - [ ] **P4.13.1** Test: MCP and REST produce identical results
   - **TEST**: Create `tests/integration/test_mcp_rest_parity.py`
@@ -2474,33 +2546,72 @@
 
 **🎯 Phase 4 Complete When:**
 - ✅ MCP server fully functional
-- ✅ All document CRUD tools implemented (6 tools: create, read, update, create_node, delete_node, list)
-- ✅ All schema introspection tools implemented (2 tools: schema_get_node, schema_get_root)
-- ✅ MCP resources implemented (document:// URIs for export)
+- ✅ All document CRUD tools implemented (6 tools)
 - ✅ All tools have descriptions and schemas
-- ✅ All tests passing (35+ tests)
-- ✅ Integration tests passing
+- ✅ All tests passing (25+ tests for MVP)
 - ✅ Error handling consistent with REST API
 - ✅ Can run MCP server: `python -m apps.mcp_server`
 - ✅ MCP and REST produce identical results (zero duplication verified)
-- ✅ User Story 3 (schema introspection) deliverable
-- ✅ Project complete: Dual interface (MCP + REST) sharing DocumentService and SchemaService
+- ✅ MVP complete: Full CRUD via both MCP and REST
+
+**MVP Note**: Schema introspection tools (4.8), resources (4.11), and integration tests (4.12-4.13) deferred for post-MVP.
 
 ---
 
-## 🎉 Project Complete!
+## 🎉 MVP COMPLETE!
 
-All phases restructured with micro-step TDD approach:
-- **Phase 0**: Core library foundation (55+ tasks) - includes schema loading, durability guarantees
-- **Phase 1**: DocumentService implementation (50 tasks) - includes optimistic locking
-- **Phase 2**: Configuration management & dev tools (35+ tasks) - includes error code catalog
-- **Phase 3**: REST API interface layer (55+ tasks) - includes schema introspection endpoints
-- **Phase 4**: MCP interface layer (45+ tasks) - includes schema introspection tools and resource URIs
+### **MVP Deliverables** (~30 hours):
+- **Phase 0**: Core library foundation (~5.2 hours) - Storage, validation, schema service
+- **Phase 1**: DocumentService implementation (~8.5 hours) - Full CRUD with basic locking
+- **Phase 2**: Basic configuration & Ruff linting (~1.5 hours) - Quality foundation
+- **Phase 3**: REST API interface (~9.2 hours) - Full CRUD endpoints
+- **Phase 4**: MCP interface (~5.5 hours) - Full CRUD tools
 
-**Total**: ~240 granular tasks, each taking ~10 minutes
+**Total MVP**: ~30 hours (35% reduction from 46 hours)
 **Pattern**: Test (FAIL) → Implement → Test (PASS) → Commit
-**Enhancements**: 
-- ✅ All CRITICAL spec violations fixed (4 issues)
+
+**What Works in MVP**:
+✅ Create documents with auto-generated IDs  
+✅ Read document nodes (full or partial paths)  
+✅ Update existing nodes with validation  
+✅ Create new array items  
+✅ Delete nodes  
+✅ List all documents with pagination  
+✅ JSON Schema validation with $ref resolution  
+✅ Both MCP and REST interfaces fully functional  
+✅ Optimistic locking with version numbers  
+✅ File system storage  
+✅ Comprehensive error handling  
+✅ Full test coverage of core features
+
+### **Post-MVP Enhancements** (~16 hours deferred):
+
+**Phase 0** (~50 min):
+- [ ] 0.6 Schema Loading - Multi-schema support from directory
+
+**Phase 1** (~1.5 hours):
+- [ ] 1.11 LockService - Advanced locking with timeout and context manager
+
+**Phase 2** (~6.5 hours):
+- [ ] 2.2 Config File Loading - JSON/YAML config files
+- [ ] 2.3 Config Env Variables - Environment variable overrides
+- [ ] 2.4 Config Validation - Enhanced validation logic
+- [ ] 2.5 Config Documentation - Example configs and docs
+- [ ] 2.6 Error Code Catalog - Comprehensive error documentation
+- [ ] 2.8 MyPy Type Checking - Static type analysis
+- [ ] 2.9 Pre-commit Hooks - Automated quality checks
+
+**Phase 3** (~2.75 hours):
+- [ ] 3.10 Schema Introspection REST - GET /schema/node endpoints (User Story 3)
+- [ ] 3.12 REST Integration Tests - End-to-end lifecycle tests
+
+**Phase 4** (~4.5 hours):
+- [ ] 4.8 MCP Schema Tools - schema_get_node, schema_get_root (User Story 3)
+- [ ] 4.11 MCP Resources - document:// URI support for Claude Desktop
+- [ ] 4.12 MCP Integration Tests - End-to-end lifecycle tests
+- [ ] 4.13 MCP vs REST Parity - Cross-interface validation tests
+
+**To Restore Post-MVP**: Search for `[MVP-DEFER]` tags in this file (15 sections marked)
 - ✅ All SHOULD ADD recommendations implemented (3 improvements)
 - ✅ All NICE TO HAVE features added (3 enhancements)
 **Result**: Clean git history with atomic, reversible changes
@@ -2512,4 +2623,5 @@ All phases restructured with micro-step TDD approach:
 **Ready to start implementation!**
 
 All phases complete and spec-compliant. Begin with Phase 0 and work sequentially.
+
 
