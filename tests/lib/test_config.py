@@ -1,10 +1,11 @@
 """
 Tests for ServerConfig - Configuration management
 """
-import pytest
-from pathlib import Path
-from pydantic import ValidationError
 
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
 
 # P2.1.1: Test ServerConfig with default values
 

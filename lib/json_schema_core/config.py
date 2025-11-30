@@ -1,6 +1,7 @@
 """
 Configuration management for JSON Schema MCP Tool
 """
+
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
