@@ -831,3 +831,81 @@ def test_delete_node_root_error(document_service, sample_schema, valid_minimal_d
         document_service.delete_node(doc_id, "/", expected_version=1)
     
     assert "root" in str(exc_info.value).lower()
+
+
+# ============================================================================
+# Phase 1.9: list_documents Tests
+# ============================================================================
+
+def test_list_documents_empty(document_service):
+    """Test that list_documents returns empty list when no documents exist"""
+    # List documents in empty storage
+    result = document_service.list_documents()
+    
+    assert result == []
+
+
+def test_list_documents_returns_metadata(document_service, sample_schema, valid_minimal_doc):
+    """Test that list_documents returns metadata for all documents"""
+    schema_id, _ = sample_schema
+    
+    # Create 3 documents
+    doc_ids = []
+    for i in range(3):
+        doc = valid_minimal_doc.copy()
+        doc["title"] = f"Document {i+1}"
+        doc_id, _ = document_service.create_document(schema_id, doc)
+        doc_ids.append(doc_id)
+    
+    # List all documents
+    result = document_service.list_documents()
+    
+    # Should return 3 metadata dicts
+    assert len(result) == 3
+    
+    # Each should have required metadata fields
+    for metadata in result:
+        assert "doc_id" in metadata
+        assert "version" in metadata
+        assert "created_at" in metadata
+        assert "updated_at" in metadata
+        assert metadata["doc_id"] in doc_ids
+
+
+def test_list_documents_pagination(document_service, sample_schema, valid_minimal_doc):
+    """Test that list_documents supports pagination"""
+    schema_id, _ = sample_schema
+    
+    # Create 5 documents
+    doc_ids = []
+    for i in range(5):
+        doc = valid_minimal_doc.copy()
+        doc["title"] = f"Document {i+1}"
+        doc_id, _ = document_service.create_document(schema_id, doc)
+        doc_ids.append(doc_id)
+    
+    # Get first 2 documents
+    page1 = document_service.list_documents(limit=2, offset=0)
+    assert len(page1) == 2
+    
+    # Get next 2 documents
+    page2 = document_service.list_documents(limit=2, offset=2)
+    assert len(page2) == 2
+    
+    # Get last 1 document
+    page3 = document_service.list_documents(limit=2, offset=4)
+    assert len(page3) == 1
+    
+    # Verify no overlap between pages
+    page1_ids = {m["doc_id"] for m in page1}
+    page2_ids = {m["doc_id"] for m in page2}
+    page3_ids = {m["doc_id"] for m in page3}
+    
+    assert len(page1_ids & page2_ids) == 0
+    assert len(page2_ids & page3_ids) == 0
+    assert len(page1_ids & page3_ids) == 0
+    
+    # Verify all 5 documents are covered
+    all_ids = page1_ids | page2_ids | page3_ids
+    assert len(all_ids) == 5
+

@@ -234,10 +234,18 @@ def test_list_documents_returns_doc_ids(tmp_path):
     """Test that list_documents returns list of document IDs."""
     storage = FileSystemStorage(tmp_path)
     
-    # Write several documents
+    # Write several documents WITH metadata (documents have metadata, schemas don't)
     doc_ids = ["doc-1", "doc-2", "doc-3"]
+    metadata = {
+        "doc_id": "",
+        "version": 1,
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00"
+    }
     for doc_id in doc_ids:
         storage.write_document(doc_id, {"data": "test"})
+        metadata["doc_id"] = doc_id
+        storage.write_metadata(doc_id, metadata)
     
     result = storage.list_documents()
     assert len(result) == 3
@@ -248,10 +256,18 @@ def test_list_documents_pagination(tmp_path):
     """Test that list_documents supports limit and offset."""
     storage = FileSystemStorage(tmp_path)
     
-    # Write 10 documents
+    # Write 10 documents WITH metadata (documents have metadata, schemas don't)
     doc_ids = [f"doc-{i:02d}" for i in range(10)]
+    metadata = {
+        "doc_id": "",
+        "version": 1,
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T00:00:00"
+    }
     for doc_id in doc_ids:
         storage.write_document(doc_id, {"data": "test"})
+        metadata["doc_id"] = doc_id
+        storage.write_metadata(doc_id, metadata)
     
     # Test limit
     result = storage.list_documents(limit=5)
