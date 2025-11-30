@@ -2,9 +2,8 @@
 SchemaService - Schema loading and $ref resolution
 """
 import copy
-from typing import Set
 from json_schema_core.storage.storage_interface import StorageInterface
-from json_schema_core.domain.errors import DocumentNotFoundError, ValidationFailedError
+from json_schema_core.domain.errors import ValidationFailedError
 
 
 class SchemaService:
@@ -44,7 +43,7 @@ class SchemaService:
         # Return a copy to prevent mutation
         return copy.deepcopy(resolved)
     
-    def _resolve_refs(self, schema: dict, base_id: str, visited: Set[str]) -> dict:
+    def _resolve_refs(self, schema: dict, base_id: str, visited: set[str]) -> dict:
         """
         Recursively resolve $ref references in a schema
         
@@ -78,7 +77,7 @@ class SchemaService:
         
         return result
     
-    def _resolve_refs_recursive(self, obj: any, base_id: str, visited: Set[str]) -> None:
+    def _resolve_refs_recursive(self, obj: any, base_id: str, visited: set[str]) -> None:
         """
         Helper to recursively resolve $ref in-place
         
