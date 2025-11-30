@@ -12,3 +12,11 @@ def test_server_creation(document_service):
     assert server is not None
     assert hasattr(server, "name")
     assert server.name == "json-schema-mcp-server"
+
+
+def test_server_has_services(mcp_server):
+    """Test that server has document service dependency."""
+    from json_schema_core.services.document_service import DocumentService
+
+    assert hasattr(mcp_server, "document_service")
+    assert isinstance(mcp_server.document_service, DocumentService)
