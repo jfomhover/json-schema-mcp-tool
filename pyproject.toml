@@ -7,6 +7,10 @@ dependencies = [
     "jsonschema>=4.20.0",
     "python-ulid>=2.2.0",
     "pydantic>=2.5.0",
+    "pydantic-settings>=2.0.0",
+    "mcp>=1.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
 ]
 
 [project.optional-dependencies]
@@ -14,6 +18,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.1.0",
+    "ruff>=0.1.0",
 ]
 
 [build-system]
@@ -25,3 +30,20 @@ packages = ["lib.json_schema_core"]
 
 [tool.setuptools.package-dir]
 "lib.json_schema_core" = "lib/json_schema_core"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "F",   # Pyflakes
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "N",   # pep8-naming
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
