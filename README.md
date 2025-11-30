@@ -14,13 +14,8 @@
 ### ✨ Key Features
 
 - 🔒 **Schema-First Design** - Every document is validated against a JSON Schema
-- 🆔 **Auto-Generated IDs** - Documents get unique ULID identifiers automatically
 - 🔄 **Optimistic Locking** - Version-based concurrency control prevents conflicts
-- 📍 **JSON Pointer Support** - Navigate and modify nested document structures
 - 🔍 **Schema Introspection** - Query and explore schema definitions at runtime
-- ⚡ **High Performance** - File-based storage with efficient indexing
-- 🧪 **Test-Driven** - 70+ tests covering all functionality
-- 🎯 **MCP Native** - Built specifically for the Model Context Protocol
 
 ## 🏗️ Architecture
 
@@ -44,17 +39,13 @@ json-schema-mcp-tool/
 └── tests/                   # Comprehensive test suite
 ```
 
-**Design Philosophy**: The monorepo structure separates concerns:
-- `lib/json_schema_core/` - Reusable core library with all business logic
-- `apps/mcp_server/` - Thin MCP protocol adapter (no business logic)
-- Future: `apps/rest_api/` - Thin REST adapter (same core library)
+Future: `apps/rest_api/` - Thin REST adapter (same core library)
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - **Python 3.11+** (required)
-- **VS Code** with [Claude Dev](https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev) extension (recommended)
 
 ### Installation
 
