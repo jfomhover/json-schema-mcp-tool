@@ -350,4 +350,31 @@ class DocumentService:
         self.storage.write_metadata(doc_id, metadata.model_dump(mode='json'))
         
         return deleted_value, metadata.version
+    
+    def list_documents(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        """List all documents with their metadata.
+        
+        Args:
+            limit: Maximum number of documents to return (default 100)
+            offset: Number of documents to skip (default 0)
+            
+        Returns:
+            List of metadata dictionaries, each containing:
+            - doc_id: Document identifier
+            - version: Current version number
+            - created_at: Creation timestamp (ISO format)
+            - updated_at: Last update timestamp (ISO format)
+        """
+        # Get document IDs from storage
+        doc_ids = self.storage.list_documents(limit=limit, offset=offset)
+        
+        # Load metadata for each document
+        metadata_list = []
+        for doc_id in doc_ids:
+            metadata_dict = self.storage.read_metadata(doc_id)
+            if metadata_dict:
+                metadata_list.append(metadata_dict)
+        
+        return metadata_list
+
 

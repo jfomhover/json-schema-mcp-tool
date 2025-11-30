@@ -96,16 +96,14 @@ class FileSystemStorage(StorageInterface):
             offset: Number of results to skip
             
         Returns:
-            List of document IDs
+            List of document IDs (only includes documents with metadata)
         """
-        # Find all .json files (excluding .meta.json files)
+        # Find all .meta.json files to get actual documents (not schemas)
         doc_ids = []
-        for file_path in self.base_path.glob("*.json"):
-            # Skip metadata files
-            if file_path.suffix == ".json" and not file_path.name.endswith(".meta.json"):
-                # Extract document ID (filename without .json extension)
-                doc_id = file_path.stem
-                doc_ids.append(doc_id)
+        for file_path in self.base_path.glob("*.meta.json"):
+            # Extract document ID (filename without .meta.json extension)
+            doc_id = file_path.stem.replace(".meta", "")
+            doc_ids.append(doc_id)
         
         # Sort for consistent ordering
         doc_ids.sort()
