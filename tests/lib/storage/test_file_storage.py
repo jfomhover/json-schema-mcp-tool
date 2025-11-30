@@ -1,0 +1,326 @@
+"""Tests for FileSystemStorage."""
+
+import json
+import os
+from pathlib import Path
+import pytest
+from json_schema_core.storage.file_storage import FileSystemStorage
+from json_schema_core.domain.errors import DocumentNotFoundError
+
+
+def test_write_document_creates_file(tmp_path):
+    """Test that write_document creates a JSON file."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-1"
+    content = {"title": "Test Document", "value": 42}
+    
+    storage.write_document(doc_id, content)
+    
+    # Check that the file exists
+    doc_file = tmp_path / f"{doc_id}.json"
+    assert doc_file.exists()
+    
+    # Verify content
+    with open(doc_file, "r") as f:
+        saved_content = json.load(f)
+    assert saved_content == content
+
+
+def test_write_document_atomic(tmp_path):
+    """Test that write_document uses atomic write (temp file + rename)."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-2"
+    content = {"data": "test"}
+    
+    # Spy on the file system to verify temp file was used
+    storage.write_document(doc_id, content)
+    
+    # After write completes, temp file should not exist
+    tmp_file = tmp_path / f"{doc_id}.tmp"
+    assert not tmp_file.exists()
+    
+    # But the final file should exist
+    doc_file = tmp_path / f"{doc_id}.json"
+    assert doc_file.exists()
+
+
+def test_write_document_cleans_up_tmp_on_error(tmp_path):
+    """Test that temp file is cleaned up when write fails."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-3"
+    
+    # Create a scenario that will fail: invalid JSON-serializable content
+    invalid_content = {"data": object()}  # object() is not JSON serializable
+    
+    with pytest.raises(TypeError):
+        storage.write_document(doc_id, invalid_content)
+    
+    # Verify temp file was cleaned up
+    tmp_file = tmp_path / f"{doc_id}.tmp"
+    assert not tmp_file.exists()
+
+
+def test_write_document_durable(tmp_path):
+    """Test that write_document uses fsync for durability."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-4"
+    content = {"important": "data"}
+    
+    # Write the document
+    storage.write_document(doc_id, content)
+    
+    # The file should exist and be readable
+    # (fsync was called, so data should be on disk)
+    doc_file = tmp_path / f"{doc_id}.json"
+    assert doc_file.exists()
+    
+    # Verify we can read it back
+    with open(doc_file, "r") as f:
+        saved_content = json.load(f)
+    assert saved_content == content
+
+
+def test_read_document_returns_content(tmp_path):
+    """Test that read_document returns the document content."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-5"
+    content = {"title": "Test", "data": [1, 2, 3]}
+    
+    # Write first
+    storage.write_document(doc_id, content)
+    
+    # Now read back
+    result = storage.read_document(doc_id)
+    assert result == content
+
+
+def test_read_document_raises_not_found(tmp_path):
+    """Test that read_document raises DocumentNotFoundError for missing documents."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "non-existent-doc"
+    
+    with pytest.raises(DocumentNotFoundError) as exc_info:
+        storage.read_document(doc_id)
+    
+    assert exc_info.value.doc_id == doc_id
+
+
+def test_write_metadata_atomic(tmp_path):
+    """Test that write_metadata uses atomic write (temp file + rename)."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-6"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 1,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-01T12:00:00"
+    }
+    
+    storage.write_metadata(doc_id, metadata)
+    
+    # After write completes, temp file should not exist
+    tmp_file = tmp_path / f"{doc_id}.meta.tmp"
+    assert not tmp_file.exists()
+    
+    # But the final metadata file should exist
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert meta_file.exists()
+
+
+def test_read_metadata(tmp_path):
+    """Test that read_metadata returns metadata."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-7"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 2,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-02T15:30:00"
+    }
+    
+    # Write first
+    storage.write_metadata(doc_id, metadata)
+    
+    # Now read back
+    result = storage.read_metadata(doc_id)
+    assert result == metadata
+
+
+def test_read_metadata_missing_returns_none(tmp_path):
+    """Test that read_metadata returns None for missing metadata."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "non-existent-metadata"
+    
+    result = storage.read_metadata(doc_id)
+    assert result is None
+
+
+def test_metadata_includes_required_fields(tmp_path):
+    """Test that metadata includes all required fields."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-8"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 1,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-01T12:00:00"
+    }
+    
+    storage.write_metadata(doc_id, metadata)
+    result = storage.read_metadata(doc_id)
+    
+    # Verify all required fields are present
+    assert "doc_id" in result
+    assert "version" in result
+    assert "schema_uri" in result
+    assert "created_at" in result
+    assert "modified_at" in result
+
+
+def test_write_metadata_cleans_up_tmp_on_error(tmp_path):
+    """Test that temp metadata file is cleaned up when write fails."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-9"
+    
+    # Create a scenario that will fail: invalid JSON-serializable content
+    invalid_metadata = {"data": object()}  # object() is not JSON serializable
+    
+    with pytest.raises(TypeError):
+        storage.write_metadata(doc_id, invalid_metadata)
+    
+    # Verify temp file was cleaned up
+    tmp_file = tmp_path / f"{doc_id}.meta.tmp"
+    assert not tmp_file.exists()
+
+
+def test_write_metadata_durable(tmp_path):
+    """Test that write_metadata uses fsync for durability."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-10"
+    metadata = {
+        "doc_id": doc_id,
+        "version": 1,
+        "schema_uri": "https://example.com/schema",
+        "created_at": "2024-01-01T12:00:00",
+        "modified_at": "2024-01-01T12:00:00"
+    }
+    
+    # Write the metadata
+    storage.write_metadata(doc_id, metadata)
+    
+    # The file should exist and be readable
+    # (fsync was called, so data should be on disk)
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert meta_file.exists()
+    
+    # Verify we can read it back
+    with open(meta_file, "r") as f:
+        saved_metadata = json.load(f)
+    assert saved_metadata == metadata
+
+
+def test_list_documents_empty(tmp_path):
+    """Test that list_documents returns empty list for empty storage."""
+    storage = FileSystemStorage(tmp_path)
+    
+    result = storage.list_documents()
+    assert result == []
+
+
+def test_list_documents_returns_doc_ids(tmp_path):
+    """Test that list_documents returns list of document IDs."""
+    storage = FileSystemStorage(tmp_path)
+    
+    # Write several documents
+    doc_ids = ["doc-1", "doc-2", "doc-3"]
+    for doc_id in doc_ids:
+        storage.write_document(doc_id, {"data": "test"})
+    
+    result = storage.list_documents()
+    assert len(result) == 3
+    assert set(result) == set(doc_ids)
+
+
+def test_list_documents_pagination(tmp_path):
+    """Test that list_documents supports limit and offset."""
+    storage = FileSystemStorage(tmp_path)
+    
+    # Write 10 documents
+    doc_ids = [f"doc-{i:02d}" for i in range(10)]
+    for doc_id in doc_ids:
+        storage.write_document(doc_id, {"data": "test"})
+    
+    # Test limit
+    result = storage.list_documents(limit=5)
+    assert len(result) == 5
+    
+    # Test offset
+    result = storage.list_documents(limit=5, offset=5)
+    assert len(result) == 5
+    
+    # Test limit + offset covers all docs
+    page1 = storage.list_documents(limit=5, offset=0)
+    page2 = storage.list_documents(limit=5, offset=5)
+    all_docs = page1 + page2
+    assert len(all_docs) == 10
+    assert set(all_docs) == set(doc_ids)
+
+
+def test_delete_document_removes_file(tmp_path):
+    """Test that delete_document removes the document file."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "doc-to-delete"
+    
+    # Write a document
+    storage.write_document(doc_id, {"data": "test"})
+    
+    # Verify it exists
+    doc_file = tmp_path / f"{doc_id}.json"
+    assert doc_file.exists()
+    
+    # Delete it
+    storage.delete_document(doc_id)
+    
+    # Verify it's gone
+    assert not doc_file.exists()
+
+
+def test_delete_document_removes_metadata(tmp_path):
+    """Test that delete_document also removes metadata file."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "doc-with-metadata"
+    
+    # Write document and metadata
+    storage.write_document(doc_id, {"data": "test"})
+    storage.write_metadata(doc_id, {"doc_id": doc_id, "version": 1})
+    
+    # Verify both exist
+    doc_file = tmp_path / f"{doc_id}.json"
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert doc_file.exists()
+    assert meta_file.exists()
+    
+    # Delete document
+    storage.delete_document(doc_id)
+    
+    # Verify both are gone
+    assert not doc_file.exists()
+    assert not meta_file.exists()
+
+
+def test_delete_document_missing_is_ok(tmp_path):
+    """Test that deleting a non-existent document is idempotent (doesn't raise error)."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "non-existent-doc"
+    
+    # Should not raise an error
+    storage.delete_document(doc_id)
+    
+    # Still no files
+    doc_file = tmp_path / f"{doc_id}.json"
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert not doc_file.exists()
+    assert not meta_file.exists()
