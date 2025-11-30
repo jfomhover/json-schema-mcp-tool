@@ -147,3 +147,60 @@ def test_create_document_atomic_storage(document_service, sample_schema, temp_st
     assert stored_doc["name"] == "Atomic Test"
     assert stored_meta["doc_id"] == doc_id
     assert stored_meta["version"] == 1
+
+
+# P1.1.2: Document Creation with Custom ID
+
+def test_create_document_with_custom_id(document_service, sample_schema, temp_storage):
+    """Test creating a document with a custom ID"""
+    schema_id, _ = sample_schema
+    custom_id = str(DocumentId.generate())
+    document = {
+        "name": "Custom ID Test",
+        "email": "custom@example.com"
+    }
+    
+    doc_id, metadata = document_service.create_document(schema_id, document, doc_id=custom_id)
+    
+    # Should use the custom ID
+    assert doc_id == custom_id
+    assert metadata.doc_id == custom_id
+    
+    # Document should be stored with custom ID
+    stored_doc = temp_storage.read_document(custom_id)
+    assert stored_doc["name"] == "Custom ID Test"
+
+
+def test_create_document_custom_id_already_exists(document_service, sample_schema, temp_storage):
+    """Test error when custom ID already exists"""
+    schema_id, _ = sample_schema
+    
+    # Create first document
+    custom_id = str(DocumentId.generate())
+    document1 = {
+        "name": "First Document",
+        "email": "first@example.com"
+    }
+    document_service.create_document(schema_id, document1, doc_id=custom_id)
+    
+    # Try to create second document with same ID
+    document2 = {
+        "name": "Second Document",
+        "email": "second@example.com"
+    }
+    
+    with pytest.raises(ValueError, match="already exists"):
+        document_service.create_document(schema_id, document2, doc_id=custom_id)
+
+
+def test_create_document_custom_id_must_be_valid(document_service, sample_schema):
+    """Test that custom ID must be valid format"""
+    schema_id, _ = sample_schema
+    document = {
+        "name": "Test",
+        "email": "test@example.com"
+    }
+    
+    # Try with invalid ID (not ULID format)
+    with pytest.raises(ValueError, match="Invalid document ID"):
+        document_service.create_document(schema_id, document, doc_id="invalid-id-123")

@@ -24,13 +24,14 @@ class DocumentService:
         self.schema_service = schema_service
         self._schema_cache: dict[str, dict] = {}
     
-    def create_document(self, schema_id: str, document: dict) -> tuple[str, DocumentMetadata]:
+    def create_document(self, schema_id: str, document: dict, doc_id: str | None = None) -> tuple[str, DocumentMetadata]:
         """
         Create a new document with validation and metadata
         
         Args:
             schema_id: The ID of the schema to validate against
             document: The document data to create
+            doc_id: Optional custom document ID (must be valid ULID format)
             
         Returns:
             Tuple of (document_id, metadata)
@@ -38,7 +39,25 @@ class DocumentService:
         Raises:
             ValidationFailedError: If document fails schema validation
             DocumentNotFoundError: If schema not found
+            ValueError: If custom doc_id is invalid or already exists
         """
+        # Validate and process custom ID if provided
+        if doc_id is not None:
+            # Validate ID format (ULID should be 26 characters, uppercase alphanumeric)
+            if not (len(doc_id) == 26 and doc_id.isalnum() and doc_id.isupper()):
+                raise ValueError(f"Invalid document ID format: {doc_id}")
+            
+            # Check if document already exists
+            try:
+                self.storage.read_document(doc_id)
+                # If we get here, document exists
+                raise ValueError(f"Document with ID {doc_id} already exists")
+            except Exception as e:
+                # If DocumentNotFoundError, that's good - ID is available
+                if "not found" not in str(e).lower():
+                    # Some other error occurred
+                    raise
+        
         # Load schema (with caching)
         if schema_id not in self._schema_cache:
             schema = self.schema_service.load_schema(schema_id)
@@ -55,8 +74,9 @@ class DocumentService:
         # Validate document against schema
         validation_service.validate(document_with_defaults)
         
-        # Generate document ID (ULID)
-        doc_id = str(DocumentId.generate())
+        # Use custom ID or generate new one
+        if doc_id is None:
+            doc_id = str(DocumentId.generate())
         
         # Create metadata
         now = datetime.now()
