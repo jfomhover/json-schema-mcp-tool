@@ -209,3 +209,102 @@ def test_circular_ref_detection_deep(schema_service, temp_storage):
     
     assert len(exc_info.value.errors) == 1
     assert "Circular reference detected" in exc_info.value.errors[0]["message"]
+
+
+# P0.5.3: Schema Introspection
+
+def test_get_required_fields(schema_service, temp_storage):
+    """Test extracting required fields from schema"""
+    schema_id = DocumentId.generate()
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "age": {"type": "integer"},
+            "email": {"type": "string"}
+        },
+        "required": ["name", "email"]
+    }
+    temp_storage.write_document(str(schema_id), schema)
+    
+    required = schema_service.get_required_fields(schema)
+    
+    assert required == ["name", "email"]
+    assert "age" not in required
+
+
+def test_get_required_fields_empty(schema_service):
+    """Test getting required fields when none are required"""
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"}
+        }
+    }
+    
+    required = schema_service.get_required_fields(schema)
+    
+    assert required == []
+
+
+def test_get_default_values(schema_service, temp_storage):
+    """Test extracting default values from schema"""
+    schema_id = DocumentId.generate()
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "default": "Anonymous"},
+            "age": {"type": "integer", "default": 0},
+            "active": {"type": "boolean", "default": True},
+            "email": {"type": "string"}  # No default
+        }
+    }
+    temp_storage.write_document(str(schema_id), schema)
+    
+    defaults = schema_service.get_default_values(schema)
+    
+    assert defaults == {
+        "name": "Anonymous",
+        "age": 0,
+        "active": True
+    }
+    assert "email" not in defaults
+
+
+def test_get_schema_dependencies(schema_service, temp_storage):
+    """Test finding all schema dependencies ($ref)"""
+    schema_a_id = DocumentId.generate()
+    schema_b_id = DocumentId.generate()
+    schema_c_id = DocumentId.generate()
+    
+    # Create schemas
+    schema_c = {"type": "string"}
+    temp_storage.write_document(str(schema_c_id), schema_c)
+    
+    schema_b = {
+        "type": "object",
+        "properties": {
+            "ref_to_c": {"$ref": f"{schema_c_id}"}
+        }
+    }
+    temp_storage.write_document(str(schema_b_id), schema_b)
+    
+    schema_a = {
+        "type": "object",
+        "properties": {
+            "ref_to_b": {"$ref": f"{schema_b_id}"},
+            "local_ref": {"$ref": "#/definitions/addr"},
+            "ref_to_c": {"$ref": f"{schema_c_id}"}
+        },
+        "definitions": {
+            "addr": {"type": "object"}
+        }
+    }
+    temp_storage.write_document(str(schema_a_id), schema_a)
+    
+    deps = schema_service.get_schema_dependencies(str(schema_a_id))
+    
+    # Should find B and C (local refs don't count)
+    assert str(schema_b_id) in deps
+    assert str(schema_c_id) in deps
+    assert len(deps) == 2

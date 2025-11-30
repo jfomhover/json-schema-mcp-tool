@@ -150,3 +150,74 @@ class SchemaService:
             else:
                 raise ValidationFailedError(f"Cannot resolve reference path: {'/'.join(path)}")
         return current
+    
+    def get_required_fields(self, schema: dict) -> list[str]:
+        """
+        Extract required field names from a schema
+        
+        Args:
+            schema: The schema to inspect
+            
+        Returns:
+            List of required field names (empty if none)
+        """
+        return schema.get("required", [])
+    
+    def get_default_values(self, schema: dict) -> dict:
+        """
+        Extract default values from schema properties
+        
+        Args:
+            schema: The schema to inspect
+            
+        Returns:
+            Dictionary mapping field names to their default values
+        """
+        defaults = {}
+        properties = schema.get("properties", {})
+        
+        for field_name, field_schema in properties.items():
+            if "default" in field_schema:
+                defaults[field_name] = field_schema["default"]
+        
+        return defaults
+    
+    def get_schema_dependencies(self, schema_id: str) -> set[str]:
+        """
+        Find all schema dependencies (external $ref) for a schema
+        
+        Args:
+            schema_id: The ID of the schema to analyze
+            
+        Returns:
+            Set of schema IDs that this schema references (excludes local #/ refs)
+        """
+        schema = self.storage.read_document(schema_id)
+        dependencies = set()
+        
+        self._collect_dependencies(schema, dependencies)
+        
+        return dependencies
+    
+    def _collect_dependencies(self, obj: any, dependencies: set[str]) -> None:
+        """
+        Recursively collect schema dependencies from $ref
+        
+        Args:
+            obj: Object to scan for $ref
+            dependencies: Set to collect dependency IDs into
+        """
+        if isinstance(obj, dict):
+            if "$ref" in obj:
+                ref = obj["$ref"]
+                # Only collect external references (not local #/ refs)
+                if not ref.startswith("#/"):
+                    dependencies.add(ref)
+            else:
+                # Recurse into dictionary values
+                for value in obj.values():
+                    self._collect_dependencies(value, dependencies)
+        elif isinstance(obj, list):
+            # Recurse into list items
+            for item in obj:
+                self._collect_dependencies(item, dependencies)
