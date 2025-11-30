@@ -54,15 +54,17 @@ def sample_schema(config):
 def document_service(config, sample_schema):
     """Return initialized DocumentService for tests."""
     storage = FileSystemStorage(config.storage_dir)
-    schema_service = SchemaService(config.schema_path, storage)
-    validation_service_factory = lambda schema: ValidationService(schema)
+    
+    # SchemaService needs schemas to be in storage
+    # Copy schema to storage location
+    import shutil
+    schema_file = config.schema_path / f"{sample_schema}.json"
+    storage_schema_file = config.storage_dir / f"{sample_schema}.json"
+    shutil.copy(schema_file, storage_schema_file)
+    
+    schema_service = SchemaService(storage)
 
-    service = DocumentService(
-        schema_id=sample_schema,
-        storage=storage,
-        schema_service=schema_service,
-        validation_service_factory=validation_service_factory,
-    )
+    service = DocumentService(storage, schema_service)
 
     return service
 
