@@ -267,3 +267,60 @@ def test_list_documents_pagination(tmp_path):
     all_docs = page1 + page2
     assert len(all_docs) == 10
     assert set(all_docs) == set(doc_ids)
+
+
+def test_delete_document_removes_file(tmp_path):
+    """Test that delete_document removes the document file."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "doc-to-delete"
+    
+    # Write a document
+    storage.write_document(doc_id, {"data": "test"})
+    
+    # Verify it exists
+    doc_file = tmp_path / f"{doc_id}.json"
+    assert doc_file.exists()
+    
+    # Delete it
+    storage.delete_document(doc_id)
+    
+    # Verify it's gone
+    assert not doc_file.exists()
+
+
+def test_delete_document_removes_metadata(tmp_path):
+    """Test that delete_document also removes metadata file."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "doc-with-metadata"
+    
+    # Write document and metadata
+    storage.write_document(doc_id, {"data": "test"})
+    storage.write_metadata(doc_id, {"doc_id": doc_id, "version": 1})
+    
+    # Verify both exist
+    doc_file = tmp_path / f"{doc_id}.json"
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert doc_file.exists()
+    assert meta_file.exists()
+    
+    # Delete document
+    storage.delete_document(doc_id)
+    
+    # Verify both are gone
+    assert not doc_file.exists()
+    assert not meta_file.exists()
+
+
+def test_delete_document_missing_is_ok(tmp_path):
+    """Test that deleting a non-existent document is idempotent (doesn't raise error)."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "non-existent-doc"
+    
+    # Should not raise an error
+    storage.delete_document(doc_id)
+    
+    # Still no files
+    doc_file = tmp_path / f"{doc_id}.json"
+    meta_file = tmp_path / f"{doc_id}.meta.json"
+    assert not doc_file.exists()
+    assert not meta_file.exists()

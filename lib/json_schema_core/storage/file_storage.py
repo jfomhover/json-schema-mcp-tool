@@ -70,12 +70,23 @@ class FileSystemStorage(StorageInterface):
             return json.load(f)
     
     def delete_document(self, doc_id: str) -> None:
-        """Delete a document.
+        """Delete a document and its metadata.
+        
+        Idempotent - does not raise error if document doesn't exist.
         
         Args:
             doc_id: Document identifier
         """
-        raise NotImplementedError("delete_document not yet implemented")
+        doc_file = self.base_path / f"{doc_id}.json"
+        meta_file = self.base_path / f"{doc_id}.meta.json"
+        
+        # Remove document file if it exists
+        if doc_file.exists():
+            doc_file.unlink()
+        
+        # Remove metadata file if it exists
+        if meta_file.exists():
+            meta_file.unlink()
     
     def list_documents(self, limit: int = 100, offset: int = 0) -> list[str]:
         """List document IDs with pagination.
