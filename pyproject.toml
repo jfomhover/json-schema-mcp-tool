@@ -1,0 +1,27 @@
+[project]
+name = "json-schema-mcp-tool"
+version = "0.1.0"
+description = "JSON Schema CRUD operations via MCP and REST API"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.20.0",
+    "python-ulid>=2.2.0",
+    "pydantic>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["lib.json_schema_core"]
+
+[tool.setuptools.package-dir]
+"lib.json_schema_core" = "lib/json_schema_core"
