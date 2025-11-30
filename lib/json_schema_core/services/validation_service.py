@@ -1,5 +1,6 @@
 """Validation service for JSON Schema validation."""
 
+import copy
 from jsonschema import validate as jsonschema_validate, ValidationError
 from json_schema_core.domain.errors import ValidationFailedError
 
@@ -52,3 +53,46 @@ class ValidationService:
             "validator": error.validator,
             "validator_value": error.validator_value,
         }
+    
+    def apply_defaults(self, document: dict) -> dict:
+        """Apply default values from schema to document.
+        
+        Creates a new document with defaults applied. Does NOT modify original.
+        
+        Args:
+            document: Document to apply defaults to
+            
+        Returns:
+            New document with defaults applied
+        """
+        # Deep copy to avoid modifying original
+        result = copy.deepcopy(document)
+        
+        # Apply defaults from schema
+        self._apply_defaults_recursive(result, self.schema)
+        
+        return result
+    
+    def _apply_defaults_recursive(self, document: dict, schema: dict) -> None:
+        """Recursively apply defaults from schema to document.
+        
+        Modifies document in place.
+        
+        Args:
+            document: Document to apply defaults to
+            schema: Schema containing default values
+        """
+        if not isinstance(schema, dict):
+            return
+        
+        # Get properties and their defaults
+        properties = schema.get("properties", {})
+        
+        for prop_name, prop_schema in properties.items():
+            if "default" in prop_schema and prop_name not in document:
+                # Apply default value
+                document[prop_name] = copy.deepcopy(prop_schema["default"])
+            elif prop_name in document and isinstance(prop_schema, dict):
+                # Recursively apply defaults to nested objects
+                if prop_schema.get("type") == "object" and isinstance(document[prop_name], dict):
+                    self._apply_defaults_recursive(document[prop_name], prop_schema)
