@@ -637,3 +637,197 @@ def test_update_node_no_save_on_conflict(document_service, sample_schema, valid_
     
     assert stored_doc["title"] == "Title 2"
     assert metadata_dict["version"] == 2
+
+
+# ============================================================================
+# Phase 1.7: create_node Tests
+# ============================================================================
+
+def test_create_node_append_to_array(document_service, sample_schema, valid_minimal_doc):
+    """Test appending an element to an array"""
+    schema_id, _ = sample_schema
+    
+    # Create document with minimal authors array
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Append new author to array
+    new_value, new_version = document_service.create_node(
+        doc_id, "/authors", "New Author", expected_version=1
+    )
+    
+    assert new_value == "New Author"
+    assert new_version == 2
+    
+    # Verify the array was updated
+    authors, _ = document_service.read_node(doc_id, "/authors")
+    assert len(authors) == 2
+    assert authors[-1] == "New Author"
+
+
+def test_create_node_add_to_object(document_service, sample_schema, valid_full_doc):
+    """Test adding a property to an object"""
+    schema_id, _ = sample_schema
+    
+    # Create document
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Add new section to sections array
+    new_section = {
+        "title": "New Section",
+        "paragraphs": ["New content"]
+    }
+    new_value, new_version = document_service.create_node(
+        doc_id, "/sections", new_section, expected_version=1
+    )
+    
+    assert new_value == new_section
+    assert new_version == 2
+    
+    # Verify the section was added
+    sections, _ = document_service.read_node(doc_id, "/sections")
+    assert len(sections) == 4  # Original 3 + 1 new
+    assert sections[-1]["title"] == "New Section"
+
+
+def test_create_node_validates_result(document_service, sample_schema, valid_minimal_doc):
+    """Test that create_node validates the resulting document"""
+    from json_schema_core.domain.errors import ValidationFailedError
+    
+    schema_id, _ = sample_schema
+    
+    # Create document
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Try to add invalid section (missing required paragraphs field)
+    invalid_section = {"title": "Bad Section"}  # Missing required 'paragraphs'
+    
+    with pytest.raises(ValidationFailedError):
+        document_service.create_node(doc_id, "/sections", invalid_section, expected_version=1)
+
+
+def test_create_node_version_conflict(document_service, sample_schema, valid_minimal_doc):
+    """Test that create_node detects version conflicts"""
+    from json_schema_core.domain.errors import VersionConflictError
+    
+    schema_id, _ = sample_schema
+    
+    # Create document (version 1)
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # First create succeeds (1 → 2)
+    document_service.create_node(doc_id, "/authors", "Author 2", expected_version=1)
+    
+    # Second create with stale version should fail
+    with pytest.raises(VersionConflictError) as exc_info:
+        document_service.create_node(doc_id, "/authors", "Author 3", expected_version=1)
+    
+    assert exc_info.value.expected == 1
+    assert exc_info.value.actual == 2
+
+
+def test_create_node_invalid_parent_type(document_service, sample_schema, valid_minimal_doc):
+    """Test that create_node fails if parent is not array or object"""
+    schema_id, _ = sample_schema
+    
+    # Create document
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Try to create node under a string field (not valid)
+    with pytest.raises(ValueError) as exc_info:
+        document_service.create_node(doc_id, "/title", "something", expected_version=1)
+    
+    assert "array or object" in str(exc_info.value).lower()
+
+
+# ============================================================================
+# Phase 1.8: delete_node Tests
+# ============================================================================
+
+def test_delete_node_from_array(document_service, sample_schema, valid_full_doc):
+    """Test deleting an element from an array"""
+    schema_id, _ = sample_schema
+    
+    # Create document with multiple authors
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Delete second author (index 1)
+    deleted_value, new_version = document_service.delete_node(
+        doc_id, "/authors/1", expected_version=1
+    )
+    
+    assert deleted_value == "Second Author"
+    assert new_version == 2
+    
+    # Verify array was updated
+    authors, _ = document_service.read_node(doc_id, "/authors")
+    assert len(authors) == 1
+    assert authors[0] == "First Author"
+
+
+def test_delete_node_from_object(document_service, sample_schema, valid_full_doc):
+    """Test deleting a property from an object"""
+    schema_id, _ = sample_schema
+    
+    # Create document with sections
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Delete first section
+    deleted_value, new_version = document_service.delete_node(
+        doc_id, "/sections/0", expected_version=1
+    )
+    
+    assert deleted_value["title"] == "Introduction"
+    assert new_version == 2
+    
+    # Verify section was removed
+    sections, _ = document_service.read_node(doc_id, "/sections")
+    assert len(sections) == 2  # Original 3 - 1
+    assert sections[0]["title"] == "Main Content"
+
+
+def test_delete_node_validates_result(document_service, sample_schema, valid_minimal_doc):
+    """Test that delete_node validates the resulting document"""
+    from json_schema_core.domain.errors import ValidationFailedError
+    
+    schema_id, _ = sample_schema
+    
+    # Create document with single author
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Try to delete the only author (would violate minItems: 1)
+    with pytest.raises(ValidationFailedError):
+        document_service.delete_node(doc_id, "/authors/0", expected_version=1)
+
+
+def test_delete_node_version_conflict(document_service, sample_schema, valid_full_doc):
+    """Test that delete_node detects version conflicts"""
+    from json_schema_core.domain.errors import VersionConflictError
+    
+    schema_id, _ = sample_schema
+    
+    # Create document (version 1)
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # First delete succeeds (1 → 2)
+    document_service.delete_node(doc_id, "/authors/1", expected_version=1)
+    
+    # Second delete with stale version should fail
+    with pytest.raises(VersionConflictError) as exc_info:
+        document_service.delete_node(doc_id, "/authors/0", expected_version=1)
+    
+    assert exc_info.value.expected == 1
+    assert exc_info.value.actual == 2
+
+
+def test_delete_node_root_error(document_service, sample_schema, valid_minimal_doc):
+    """Test that delete_node cannot delete root node"""
+    schema_id, _ = sample_schema
+    
+    # Create document
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Try to delete root
+    with pytest.raises(ValueError) as exc_info:
+        document_service.delete_node(doc_id, "/", expected_version=1)
+    
+    assert "root" in str(exc_info.value).lower()
