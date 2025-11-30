@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/text.json",
+  "title": "Text Document",
+  "description": "A schema for a text document with title, authors, sections, and paragraphs. This schema is used for unit testing only.",
+  "type": "object",
+  "required": ["title", "authors", "sections"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "The title of the text document",
+      "minLength": 1
+    },
+    "authors": {
+      "type": "array",
+      "description": "List of authors",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "sections": {
+      "type": "array",
+      "description": "Sections of the document, each containing paragraphs",
+      "items": {
+        "$ref": "#/$defs/section"
+      },
+      "default": []
+    }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "description": "A section of the document with a title and paragraphs",
+      "required": ["title", "paragraphs"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "The title of the section",
+          "minLength": 1
+        },
+        "paragraphs": {
+          "type": "array",
+          "description": "Paragraphs within the section",
+          "items": {
+            "type": "string",
+            "description": "A single paragraph as a string",
+            "minLength": 1
+          },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
