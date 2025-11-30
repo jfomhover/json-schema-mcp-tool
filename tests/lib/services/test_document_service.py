@@ -486,3 +486,154 @@ def test_read_node_invalid_array_index(document_service, sample_schema, valid_mi
     # Try to read index that doesn't exist
     with pytest.raises(PathNotFoundError):
         document_service.read_node(doc_id, "/sections/99")
+
+
+# P1.5: Document Updating - update_node (Happy Path)
+
+def test_update_node_simple_field(document_service, sample_schema, valid_minimal_doc, temp_storage):
+    """Test updating a simple field in a document"""
+    schema_id, _ = sample_schema
+    
+    # Create document (version 1)
+    doc_id, metadata = document_service.create_document(schema_id, valid_minimal_doc)
+    assert metadata.version == 1
+    
+    # Update the title field
+    new_value, new_version = document_service.update_node(
+        doc_id, "/title", "Updated Title", expected_version=1
+    )
+    
+    # Should return new value and incremented version
+    assert new_value == "Updated Title"
+    assert new_version == 2
+    
+    # Verify the change was persisted
+    stored_title, version = document_service.read_node(doc_id, "/title")
+    assert stored_title == "Updated Title"
+    assert version == 2
+
+
+def test_update_node_increments_version(document_service, sample_schema, valid_minimal_doc):
+    """Test that update_node increments version correctly"""
+    schema_id, _ = sample_schema
+    
+    # Create document (version 1)
+    doc_id, metadata = document_service.create_document(schema_id, valid_minimal_doc)
+    assert metadata.version == 1
+    
+    # First update (1 → 2)
+    _, version = document_service.update_node(doc_id, "/title", "Title 2", expected_version=1)
+    assert version == 2
+    
+    # Second update (2 → 3)
+    _, version = document_service.update_node(doc_id, "/title", "Title 3", expected_version=2)
+    assert version == 3
+    
+    # Third update (3 → 4)
+    _, version = document_service.update_node(doc_id, "/title", "Title 4", expected_version=3)
+    assert version == 4
+
+
+def test_update_node_updates_timestamp(document_service, sample_schema, valid_minimal_doc, temp_storage):
+    """Test that update_node updates the updated_at timestamp"""
+    import time
+    
+    schema_id, _ = sample_schema
+    
+    # Create document
+    doc_id, metadata = document_service.create_document(schema_id, valid_minimal_doc)
+    created_at = metadata.created_at
+    
+    # Wait a bit to ensure timestamp difference
+    time.sleep(0.1)
+    
+    # Update the document
+    document_service.update_node(doc_id, "/title", "Updated Title", expected_version=1)
+    
+    # Read metadata and check timestamp
+    metadata_dict = temp_storage.read_metadata(doc_id)
+    updated_at = datetime.fromisoformat(metadata_dict["updated_at"])
+    
+    assert updated_at > created_at
+
+
+def test_update_node_validates_result(document_service, sample_schema, valid_minimal_doc):
+    """Test that update_node validates the updated document"""
+    schema_id, _ = sample_schema
+    
+    # Create document
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Try to update title with wrong type (integer instead of string)
+    with pytest.raises(ValidationFailedError):
+        document_service.update_node(doc_id, "/title", 12345, expected_version=1)
+
+
+def test_update_node_nested_field(document_service, sample_schema, valid_full_doc):
+    """Test updating a nested field in a document"""
+    schema_id, _ = sample_schema
+    
+    # Create document with nested content
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Update nested section title
+    new_value, new_version = document_service.update_node(
+        doc_id, "/sections/0/title", "Updated Section Title", expected_version=1
+    )
+    
+    assert new_value == "Updated Section Title"
+    assert new_version == 2
+    
+    # Verify the change
+    section_title, _ = document_service.read_node(doc_id, "/sections/0/title")
+    assert section_title == "Updated Section Title"
+
+
+# P1.6: Document Updating - update_node (Optimistic Locking)
+
+def test_update_node_version_conflict(document_service, sample_schema, valid_minimal_doc):
+    """Test that update_node raises VersionConflictError on version mismatch"""
+    from json_schema_core.domain.errors import VersionConflictError
+    
+    schema_id, _ = sample_schema
+    
+    # Create document (version 1)
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # First update succeeds (1 → 2)
+    document_service.update_node(doc_id, "/title", "Title 2", expected_version=1)
+    
+    # Try to update with stale version (should fail)
+    with pytest.raises(VersionConflictError) as exc_info:
+        document_service.update_node(doc_id, "/title", "Title 3", expected_version=1)
+    
+    # Verify error details
+    error = exc_info.value
+    assert error.expected == 1
+    assert error.actual == 2
+
+
+def test_update_node_no_save_on_conflict(document_service, sample_schema, valid_minimal_doc, temp_storage):
+    """Test that update_node doesn't save when version conflict occurs"""
+    from json_schema_core.domain.errors import VersionConflictError
+    
+    schema_id, _ = sample_schema
+    
+    # Create document (version 1)
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Update to version 2
+    document_service.update_node(doc_id, "/title", "Title 2", expected_version=1)
+    
+    # Try to update with stale version (should fail)
+    try:
+        document_service.update_node(doc_id, "/title", "Title 3", expected_version=1)
+    except VersionConflictError:
+        pass  # Expected
+    
+    # Verify document is still at version 2 with "Title 2"
+    stored_doc = temp_storage.read_document(doc_id)
+    metadata_dict = temp_storage.read_metadata(doc_id)
+    
+    assert stored_doc["title"] == "Title 2"
+    assert metadata_dict["version"] == 2

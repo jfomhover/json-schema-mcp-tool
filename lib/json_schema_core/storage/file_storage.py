@@ -40,8 +40,8 @@ class FileSystemStorage(StorageInterface):
                 # Ensure data reaches disk before rename
                 os.fsync(f.fileno())
             
-            # Atomic rename (on POSIX systems)
-            tmp_file.rename(doc_file)
+            # Atomic replace (works on both Windows and POSIX)
+            tmp_file.replace(doc_file)
             
         except Exception:
             # Clean up temp file on any error
@@ -151,8 +151,8 @@ class FileSystemStorage(StorageInterface):
                 # Ensure data reaches disk before rename
                 os.fsync(f.fileno())
             
-            # Atomic rename (on POSIX systems)
-            tmp_file.rename(meta_file)
+            # Atomic replace (works on both Windows and POSIX)
+            tmp_file.replace(meta_file)
             
         except Exception:
             # Clean up temp file on any error
