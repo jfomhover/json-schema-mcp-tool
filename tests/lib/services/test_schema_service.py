@@ -308,3 +308,78 @@ def test_get_schema_dependencies(schema_service, temp_storage):
     assert str(schema_b_id) in deps
     assert str(schema_c_id) in deps
     assert len(deps) == 2
+
+
+# P0.5.4: Schema Caching
+
+def test_schema_caching_reduces_calls(schema_service, temp_storage, monkeypatch):
+    """Test that schema caching reduces storage reads"""
+    schema_id = DocumentId.generate()
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"}
+        }
+    }
+    temp_storage.write_document(str(schema_id), schema)
+    
+    # Track storage reads
+    read_count = 0
+    original_read = temp_storage.read_document
+    
+    def tracked_read(doc_id):
+        nonlocal read_count
+        read_count += 1
+        return original_read(doc_id)
+    
+    monkeypatch.setattr(temp_storage, "read_document", tracked_read)
+    
+    # First load - should hit storage
+    schema_service.load_schema(str(schema_id))
+    assert read_count == 1
+    
+    # Second load - should use cache (no additional storage read)
+    schema_service.load_schema(str(schema_id))
+    assert read_count == 1  # Still 1, not 2
+
+
+def test_clear_cache(schema_service, temp_storage):
+    """Test clearing the schema cache"""
+    schema_id = DocumentId.generate()
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"}
+        }
+    }
+    temp_storage.write_document(str(schema_id), schema)
+    
+    # Load schema to populate cache
+    schema_service.load_schema(str(schema_id))
+    assert len(schema_service._cache) > 0
+    
+    # Clear cache
+    schema_service.clear_cache()
+    assert len(schema_service._cache) == 0
+
+
+def test_cache_isolation(schema_service, temp_storage):
+    """Test that cached schemas are isolated (no mutation)"""
+    schema_id = DocumentId.generate()
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "default": "Original"}
+        }
+    }
+    temp_storage.write_document(str(schema_id), schema)
+    
+    # Load schema twice
+    schema1 = schema_service.load_schema(str(schema_id))
+    schema2 = schema_service.load_schema(str(schema_id))
+    
+    # Modify first copy
+    schema1["properties"]["name"]["default"] = "Modified"
+    
+    # Second copy should be unaffected
+    assert schema2["properties"]["name"]["default"] == "Original"

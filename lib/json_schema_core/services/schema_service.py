@@ -28,13 +28,21 @@ class SchemaService:
         Raises:
             DocumentNotFoundError: If schema not found in storage
         """
+        # Check cache first
+        if schema_id in self._cache:
+            return copy.deepcopy(self._cache[schema_id])
+        
         # Load the base schema
         schema = self.storage.read_document(schema_id)
         
         # Resolve all $ref references
         resolved = self._resolve_refs(schema, schema_id, set())
         
-        return resolved
+        # Cache the resolved schema
+        self._cache[schema_id] = resolved
+        
+        # Return a copy to prevent mutation
+        return copy.deepcopy(resolved)
     
     def _resolve_refs(self, schema: dict, base_id: str, visited: Set[str]) -> dict:
         """
@@ -221,3 +229,7 @@ class SchemaService:
             # Recurse into list items
             for item in obj:
                 self._collect_dependencies(item, dependencies)
+    
+    def clear_cache(self) -> None:
+        """Clear all cached schemas"""
+        self._cache.clear()
