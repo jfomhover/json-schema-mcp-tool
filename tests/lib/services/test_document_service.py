@@ -371,3 +371,118 @@ def test_create_document_empty_required_array(document_service, sample_schema):
     # Check if any error mentions the validation issue
     error_str = str(error.errors).lower()
     assert "authors" in error_str or "minitems" in error_str or "too short" in error_str
+
+
+# P1.3: Document Reading - read_node (Happy Path)
+
+def test_read_node_root(document_service, sample_schema, valid_full_doc, temp_storage):
+    """Test reading full document with root path '/'"""
+    schema_id, _ = sample_schema
+    
+    # Create a document
+    doc_id, metadata = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Read root path
+    content, version = document_service.read_node(doc_id, "/")
+    
+    # Should return full document
+    assert content["title"] == valid_full_doc["title"]
+    assert content["authors"] == valid_full_doc["authors"]
+    assert len(content["sections"]) == len(valid_full_doc["sections"])
+    assert version == 1
+
+
+def test_read_node_simple_field(document_service, sample_schema, valid_full_doc):
+    """Test reading a simple field using JSONPointer"""
+    schema_id, _ = sample_schema
+    
+    # Create a document
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Read the title field
+    title, version = document_service.read_node(doc_id, "/title")
+    
+    assert title == valid_full_doc["title"]
+    assert version == 1
+
+
+def test_read_node_nested_path(document_service, sample_schema, valid_full_doc):
+    """Test reading nested paths with JSONPointer"""
+    schema_id, _ = sample_schema
+    
+    # Create a document
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Read nested section title
+    section_title, version = document_service.read_node(doc_id, "/sections/0/title")
+    
+    assert section_title == valid_full_doc["sections"][0]["title"]
+    assert version == 1
+
+
+def test_read_node_array_element(document_service, sample_schema, valid_full_doc):
+    """Test reading array element using JSONPointer"""
+    schema_id, _ = sample_schema
+    
+    # Create a document
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Read first author
+    first_author, version = document_service.read_node(doc_id, "/authors/0")
+    
+    assert first_author == valid_full_doc["authors"][0]
+    assert version == 1
+
+
+def test_read_node_deep_nested(document_service, sample_schema, valid_full_doc):
+    """Test reading deeply nested content"""
+    schema_id, _ = sample_schema
+    
+    # Create a document
+    doc_id, _ = document_service.create_document(schema_id, valid_full_doc)
+    
+    # Read first paragraph of first section
+    paragraph, version = document_service.read_node(doc_id, "/sections/0/paragraphs/0")
+    
+    assert paragraph == valid_full_doc["sections"][0]["paragraphs"][0]
+    assert version == 1
+
+
+# P1.4: Document Reading - read_node (Error Handling)
+
+def test_read_node_document_not_found(document_service):
+    """Test that reading non-existent document raises error"""
+    from json_schema_core.domain.errors import DocumentNotFoundError
+    
+    non_existent_id = str(DocumentId.generate())
+    
+    with pytest.raises(DocumentNotFoundError):
+        document_service.read_node(non_existent_id, "/")
+
+
+def test_read_node_path_not_found(document_service, sample_schema, valid_minimal_doc):
+    """Test that reading non-existent path raises error"""
+    from json_schema_core.domain.errors import PathNotFoundError
+    
+    schema_id, _ = sample_schema
+    
+    # Create a document
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Try to read non-existent field
+    with pytest.raises(PathNotFoundError):
+        document_service.read_node(doc_id, "/nonexistent")
+
+
+def test_read_node_invalid_array_index(document_service, sample_schema, valid_minimal_doc):
+    """Test that invalid array index raises error"""
+    from json_schema_core.domain.errors import PathNotFoundError
+    
+    schema_id, _ = sample_schema
+    
+    # Create a minimal document (empty sections array)
+    doc_id, _ = document_service.create_document(schema_id, valid_minimal_doc)
+    
+    # Try to read index that doesn't exist
+    with pytest.raises(PathNotFoundError):
+        document_service.read_node(doc_id, "/sections/99")
