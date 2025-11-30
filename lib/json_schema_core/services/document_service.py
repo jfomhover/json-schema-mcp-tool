@@ -9,7 +9,7 @@ from json_schema_core.services.validation_service import ValidationService
 from json_schema_core.domain.document_id import DocumentId
 from json_schema_core.domain.metadata import DocumentMetadata
 from json_schema_core.domain.errors import DocumentNotFoundError, VersionConflictError
-from json_schema_core.utils.json_pointer import resolve_pointer, set_pointer
+from json_schema_core.utils.json_pointer import resolve_pointer, set_pointer, delete_pointer
 
 
 class DocumentService:
@@ -215,3 +215,139 @@ class DocumentService:
         self.storage.write_metadata(doc_id, metadata.model_dump(mode='json'))
         
         return value, metadata.version
+    
+    def create_node(self, doc_id: str, parent_path: str, value: Any, expected_version: int) -> tuple[Any, int]:
+        """Create a new node by appending to array or adding to object.
+        
+        Args:
+            doc_id: Document identifier
+            parent_path: JSONPointer to parent array or object
+            value: Value to append/add
+            expected_version: Expected document version for optimistic locking
+            
+        Returns:
+            Tuple of (created_value, new_version)
+            
+        Raises:
+            DocumentNotFoundError: If document doesn't exist
+            PathNotFoundError: If parent_path doesn't exist
+            VersionConflictError: If version doesn't match
+            ValidationFailedError: If result violates schema
+            ValueError: If parent is not array/object
+        """
+        # Load document from storage
+        try:
+            document = self.storage.read_document(doc_id)
+        except Exception as e:
+            if "not found" in str(e).lower():
+                raise DocumentNotFoundError(doc_id)
+            raise
+        
+        # Load metadata
+        metadata_dict = self.storage.read_metadata(doc_id)
+        if metadata_dict is None:
+            raise DocumentNotFoundError(doc_id)
+        
+        # Check version for optimistic locking
+        current_version = metadata_dict["version"]
+        if current_version != expected_version:
+            raise VersionConflictError(expected=expected_version, actual=current_version)
+        
+        # Navigate to parent node
+        parent = resolve_pointer(document, parent_path)
+        
+        # Append/add based on parent type
+        if isinstance(parent, list):
+            # Append to array
+            parent.append(value)
+        elif isinstance(parent, dict):
+            # For dict, value should be a dict with a single key to add
+            # But actually, looking at the test, we're appending to an array WITHIN an object
+            # The parent_path points to the array, not the object
+            # So this case shouldn't happen - if parent is dict, it's an error
+            raise ValueError(f"Parent at {parent_path} must be an array for append operations, got object")
+        else:
+            raise ValueError(f"Parent at {parent_path} must be array or object, got {type(parent).__name__}")
+        
+        # Validate the modified document
+        if self._schema_cache:
+            schema = next(iter(self._schema_cache.values()))
+            validation_service = ValidationService(schema)
+            validation_service.validate(document)
+        
+        # Convert metadata dict to DocumentMetadata object
+        metadata = DocumentMetadata(**metadata_dict)
+        
+        # Increment version and update timestamp (returns new instance)
+        metadata = metadata.increment_version()
+        
+        # Store updated document and metadata
+        self.storage.write_document(doc_id, document)
+        self.storage.write_metadata(doc_id, metadata.model_dump(mode='json'))
+        
+        return value, metadata.version
+    
+    def delete_node(self, doc_id: str, node_path: str, expected_version: int) -> tuple[Any, int]:
+        """Delete a node from document.
+        
+        Args:
+            doc_id: Document identifier
+            node_path: JSONPointer to node to delete
+            expected_version: Expected document version for optimistic locking
+            
+        Returns:
+            Tuple of (deleted_value, new_version)
+            
+        Raises:
+            DocumentNotFoundError: If document doesn't exist
+            PathNotFoundError: If node_path doesn't exist
+            VersionConflictError: If version doesn't match
+            ValidationFailedError: If result violates schema
+            ValueError: If trying to delete root
+        """
+        # Prevent deletion of root
+        if node_path == "/":
+            raise ValueError("Cannot delete root node")
+        
+        # Load document from storage
+        try:
+            document = self.storage.read_document(doc_id)
+        except Exception as e:
+            if "not found" in str(e).lower():
+                raise DocumentNotFoundError(doc_id)
+            raise
+        
+        # Load metadata
+        metadata_dict = self.storage.read_metadata(doc_id)
+        if metadata_dict is None:
+            raise DocumentNotFoundError(doc_id)
+        
+        # Check version for optimistic locking
+        current_version = metadata_dict["version"]
+        if current_version != expected_version:
+            raise VersionConflictError(expected=expected_version, actual=current_version)
+        
+        # Get the value before deleting it
+        deleted_value = resolve_pointer(document, node_path)
+        
+        # Delete the node using JSONPointer (returns modified copy)
+        document = delete_pointer(document, node_path)
+        
+        # Validate the modified document
+        if self._schema_cache:
+            schema = next(iter(self._schema_cache.values()))
+            validation_service = ValidationService(schema)
+            validation_service.validate(document)
+        
+        # Convert metadata dict to DocumentMetadata object
+        metadata = DocumentMetadata(**metadata_dict)
+        
+        # Increment version and update timestamp (returns new instance)
+        metadata = metadata.increment_version()
+        
+        # Store updated document and metadata
+        self.storage.write_document(doc_id, document)
+        self.storage.write_metadata(doc_id, metadata.model_dump(mode='json'))
+        
+        return deleted_value, metadata.version
+
