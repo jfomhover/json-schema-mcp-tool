@@ -162,16 +162,22 @@
   - **Acceptance**: Test passes
   - **Commit**: `"feat(storage): add StorageInterface ABC with tests"`
 
-- [ ] **P0.2.2** Write test + impl: FileSystemStorage - write_document
+- [ ] **P0.2.2** Write test + impl: FileSystemStorage - write_document with durability
   - **TEST**: Create `tests/lib/storage/test_file_storage.py`
     - Test: `test_write_document_creates_file(tmp_path)` - Write JSON document
     - Test: `test_write_document_atomic(tmp_path)` - Uses temp file + rename
+    - Test: `test_write_document_cleans_up_tmp_on_error(tmp_path)` - .tmp removed on failure
+    - Test: `test_write_document_durable(tmp_path)` - Data survives simulated crash (uses fsync)
   - **IMPL**: Create `lib/json_schema_core/storage/file_storage.py`
     - Class: `FileSystemStorage(StorageInterface)`
     - Method: `__init__(self, base_path: Path)`
     - Method: `write_document(self, doc_id: str, content: dict) -> None`
-  - **Acceptance**: Tests pass
-  - **Commit**: `"feat(storage): implement write_document with atomic writes"`
+      - Write to {doc_id}.tmp
+      - **Call os.fsync(fd) before closing** to flush to disk
+      - Rename to {doc_id}.json (atomic)
+      - **On any exception: try to remove .tmp file in finally block**
+  - **Acceptance**: Tests pass with durability guarantees
+  - **Commit**: `"feat(storage): implement write_document with atomic writes, fsync, and cleanup"`
 
 - [ ] **P0.2.3** Write test + impl: FileSystemStorage - read_document
   - **TEST**: Add to `tests/lib/storage/test_file_storage.py`
@@ -182,16 +188,24 @@
   - **Acceptance**: Tests pass
   - **Commit**: `"feat(storage): implement read_document with error handling"`
 
-- [ ] **P0.2.4** Write test + impl: FileSystemStorage - metadata operations
+- [ ] **P0.2.4** Write test + impl: FileSystemStorage - metadata operations with durability
   - **TEST**: Add to `tests/lib/storage/test_file_storage.py`
-    - Test: `test_write_metadata(tmp_path)` - Write metadata JSON
-    - Test: `test_read_metadata(tmp_path)` - Read metadata JSON
+    - Test: `test_write_metadata_atomic(tmp_path)` - Write {doc_id}.meta.json atomically
+    - Test: `test_read_metadata(tmp_path)` - Read metadata JSON with version, timestamps
     - Test: `test_read_metadata_missing_returns_none(tmp_path)` - No file = None
+    - Test: `test_metadata_includes_required_fields(tmp_path)` - Has doc_id, version, schema_uri, created_at, modified_at
+    - Test: `test_write_metadata_cleans_up_tmp_on_error(tmp_path)` - .meta.tmp removed on failure
+    - Test: `test_write_metadata_durable(tmp_path)` - Data survives simulated crash (uses fsync)
   - **IMPL**: Update `lib/json_schema_core/storage/file_storage.py`
     - Method: `write_metadata(self, doc_id: str, metadata: dict) -> None`
+      - Write to {doc_id}.meta.tmp
+      - **Call os.fsync(fd) before closing** to ensure data reaches disk
+      - Rename to {doc_id}.meta.json (atomic on POSIX)
+      - **On any exception: try to remove .meta.tmp file in finally block**
     - Method: `read_metadata(self, doc_id: str) -> dict | None`
-  - **Acceptance**: Tests pass
-  - **Commit**: `"feat(storage): add metadata read/write operations"`
+      - Read {doc_id}.meta.json, return dict or None if missing
+  - **Acceptance**: Tests pass, metadata stored separately with durability guarantees
+  - **Commit**: `"feat(storage): add atomic metadata operations with fsync and cleanup"`
 
 - [ ] **P0.2.5** Write test + impl: FileSystemStorage - list_documents
   - **TEST**: Add to `tests/lib/storage/test_file_storage.py`
@@ -224,23 +238,31 @@
     - Test: `test_parse_pointer()` - Parse "/title" into ["title"]
     - Test: `test_parse_nested_pointer()` - Parse "/sections/0/paragraphs/1"
     - Test: `test_resolve_pointer()` - Get value from document
-    - Test: `test_resolve_pointer_not_found()` - Raises PathNotFoundError
+    - Test: `test_resolve_pointer_not_found()` - Raises PathNotFoundError with detailed info
+      - Try to resolve "/a/b/c" when "/a/b" doesn't exist
+      - Assert error includes: requested path, deepest existing ancestor ("/a"), guidance message
   - **IMPL**: Create `lib/json_schema_core/utils/json_pointer.py`
     - Function: `parse_pointer(pointer: str) -> list[str]`
     - Function: `resolve_pointer(document: dict, pointer: str) -> Any`
+      - Raise PathNotFoundError with requested_path, deepest_ancestor, and guidance
   - **Acceptance**: Tests pass
-  - **Commit**: `"feat(utils): add JSONPointer resolution with tests"`
+  - **Commit**: `"feat(utils): add JSONPointer resolution with detailed path errors"`
 
 - [ ] **P0.3.2** Write test + impl: JSONPointer - set and delete
   - **TEST**: Add to `tests/lib/utils/test_json_pointer.py`
     - Test: `test_set_pointer()` - Update value at pointer
-    - Test: `test_set_pointer_creates_path()` - Create missing intermediate objects
+    - Test: `test_set_pointer_fails_missing_intermediate()` - NO auto-create of paths
+      - Try to set "/a/b/c" when "/a/b" doesn't exist
+      - Assert raises PathNotFoundError with guidance
     - Test: `test_delete_pointer()` - Remove value at pointer
+    - Test: `test_delete_pointer_not_found()` - Raises PathNotFoundError with details
   - **IMPL**: Update `lib/json_schema_core/utils/json_pointer.py`
     - Function: `set_pointer(document: dict, pointer: str, value: Any) -> dict`
+      - Must NOT auto-create intermediate paths (FR-092)
+      - Raise PathNotFoundError if intermediate path missing
     - Function: `delete_pointer(document: dict, pointer: str) -> dict`
   - **Acceptance**: Tests pass
-  - **Commit**: `"feat(utils): add JSONPointer set/delete operations"`
+  - **Commit**: `"feat(utils): add JSONPointer set/delete with path validation"`
 
 ---
 
@@ -271,9 +293,9 @@
 
 ---
 
-### 0.5 Service Layer - SchemaService [~20 minutes]
+### 0.5 Service Layer - SchemaService [~2 hours]
 
-**Goal**: Build SchemaService to load schemas
+**Goal**: Build SchemaService to load schemas with $ref resolution and schema introspection
 
 - [ ] **P0.5.1** Write test + impl: SchemaService - load schema
   - **TEST**: Create `tests/lib/services/test_schema_service.py`
@@ -282,16 +304,135 @@
     - Test: `test_load_schema_not_found()` - Raises error for missing schema
   - **IMPL**: Create `lib/json_schema_core/services/schema_service.py`
     - Class: `SchemaService`
-    - Method: `__init__(self, schema_dir: Path)`
-    - Method: `load_schema(self, schema_name: str) -> dict`
+    - Method: `__init__(self, schema_path: Path)`
+    - Method: `load_schema() -> dict` - Load and cache schema
   - **Acceptance**: Tests pass
-  - **Commit**: `"feat(services): add SchemaService with tests"`
+  - **Commit**: `"feat(services): add SchemaService with schema loading"`
+
+- [ ] **P0.5.2** Write test + impl: $ref resolution with defaults
+  - **TEST**: Add test
+    - Test: `test_resolve_refs_with_defaults()`
+      - Create schema with $ref to definition containing defaults
+      - Load and resolve schema
+      - Assert defaults merged from referenced schema
+    - Test: `test_resolve_nested_refs()`
+      - Create schema with nested $ref chain
+      - Assert all references resolved
+  - **IMPL**: Add to `SchemaService`
+    - Method: `_resolve_refs(schema: dict) -> dict` - Recursively resolve $ref
+    - Merge defaults from referenced schemas into resolved tree
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): add $ref resolution with default merging"`
+
+- [ ] **P0.5.3** Write test + impl: Circular $ref detection
+  - **TEST**: Add test
+    - Test: `test_circular_ref_detection()`
+      - Create schema with circular $ref (A -> B -> A)
+      - Assert raises SchemaResolutionError with clear message
+  - **IMPL**: Update `_resolve_refs()`
+    - Track visited refs during resolution
+    - Detect cycles and raise SchemaResolutionError
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): detect circular $ref references"`
+
+- [ ] **P0.5.4** Write test + impl: get_node_schema for path introspection
+  - **TEST**: Add test
+    - Test: `test_get_node_schema_root()` - Get schema for "/" path
+    - Test: `test_get_node_schema_nested()` - Get schema for "/metadata/title"
+    - Test: `test_get_node_schema_array_item()` - Get schema for "/sections/0"
+    - Test: `test_get_node_schema_invalid_path()` - Raises error
+  - **IMPL**: Add to `SchemaService`
+    - Method: `get_node_schema(node_path: str, dereferenced: bool = True) -> dict`
+      - Navigate schema tree following JSON Pointer path
+      - Return schema definition for that location
+      - If dereferenced=True, resolve $refs in result
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): add get_node_schema for path introspection"`
+
+- [ ] **P0.5.5** Write test + impl: get_root_schema
+  - **TEST**: Add test
+    - Test: `test_get_root_schema_dereferenced()` - Get full schema with $refs resolved
+    - Test: `test_get_root_schema_raw()` - Get schema with $refs intact
+  - **IMPL**: Add to `SchemaService`
+    - Method: `get_root_schema(dereferenced: bool = True) -> tuple[dict, str]`
+      - Return (schema_dict, schema_uri)
+      - If dereferenced=True, return resolved version
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): add get_root_schema method"`
+
+- [ ] **P0.5.6** Write test + impl: Handle polymorphic schemas (oneOf/anyOf)
+  - **TEST**: Add test
+    - Test: `test_get_node_schema_oneOf()` - Path with oneOf returns all options
+    - Test: `test_get_node_schema_anyOf()` - Path with anyOf returns all options
+  - **IMPL**: Update `get_node_schema()`
+    - When encountering oneOf/anyOf/allOf, include complete type information
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): handle polymorphic schemas in introspection"`
+
+---
+
+### 0.6 Schema Loading and Validation [~30 minutes]
+
+**Goal**: Load and validate schema files from `schemas/` directory at startup
+
+- [ ] **P0.6.1** Test: Load schema files from directory
+  - **TEST**: `tests/lib/services/test_schema_service_loading.py`
+    - Create `TestSchemaLoading` class
+    - Test `test_load_all_schemas_from_directory()`:
+      - Create test schema directory with book.json and text.json
+      - Call `SchemaService.load_schemas(schemas_dir)`
+      - Assert both schemas loaded
+      - Assert can retrieve by name: `get_schema("book")`, `get_schema("text")`
+    - Test `test_invalid_schema_file_raises_error()`:
+      - Create invalid JSON file in schemas directory
+      - Assert `SchemaService.load_schemas()` raises `SchemaResolutionFailed`
+    - Test `test_missing_id_field_raises_error()`:
+      - Create schema without `$id` field
+      - Assert raises error with clear message
+  - **Acceptance**: FAIL - SchemaService doesn't have load_schemas() method yet
+  - **Commit**: `"test(services): add schema directory loading tests"`
+
+- [ ] **P0.6.2** Implement: Add load_schemas() to SchemaService
+  - **IMPL**: Update `lib/json_schema_core/services/schema_service.py`
+    - Add `load_schemas(schemas_dir: Path) -> None` method
+    - Read all .json files from directory
+    - For each file:
+      - Parse JSON
+      - Validate has `$id` field
+      - Extract schema name from $id (e.g., "urn:example:text" → "text")
+      - Store in internal registry: `self._schemas[name] = schema`
+    - Raise `SchemaResolutionFailed` for invalid files or missing $id
+  - **Acceptance**: Tests from P0.6.1 PASS
+  - **Commit**: `"feat(services): add schema directory loading to SchemaService"`
+
+- [ ] **P0.6.3** Test: Schema validation at load time
+  - **TEST**: Add to `test_schema_service_loading.py`
+    - Test `test_schema_with_invalid_json_schema_raises_error()`:
+      - Create file with invalid JSON Schema (e.g., wrong type for "type" field)
+      - Assert `load_schemas()` raises error
+    - Test `test_duplicate_schema_ids_raise_error()`:
+      - Create two files with same $id
+      - Assert raises error mentioning duplicate ID
+  - **Acceptance**: FAIL - No validation yet
+  - **Commit**: `"test(services): add schema validation at load time"`
+
+- [ ] **P0.6.4** Implement: Validate schemas at load time
+  - **IMPL**: Update `SchemaService.load_schemas()`
+    - After parsing JSON, validate it's valid JSON Schema
+    - Use jsonschema Draft 7 meta-schema for validation
+    - Check for duplicate $id values
+    - Raise `SchemaResolutionFailed` with detailed messages
+  - **Acceptance**: Tests from P0.6.3 PASS
+  - **Commit**: `"feat(services): validate schemas at load time"`
+
+---
 
 **🎯 Phase 0 Complete When:**
 - ✅ All domain models implemented with tests
-- ✅ FileSystemStorage fully implemented with tests
+- ✅ FileSystemStorage fully implemented with tests (including metadata files)
 - ✅ JSONPointer utilities implemented with tests
-- ✅ ValidationService and SchemaService implemented with tests
+- ✅ ValidationService implemented with tests (validate + apply_defaults + check_required_defaults)
+- ✅ SchemaService implemented with tests (load, $ref resolution, get_node_schema, get_root_schema)
 - ✅ **All tests passing, 100% coverage**
 - ✅ Can run `pytest tests/lib/` and see ALL GREEN
 - ✅ Ready to build DocumentService in Phase 1 (it now has all dependencies)
@@ -306,8 +447,8 @@
 - ✅ Domain models (DocumentId, DocumentMetadata, errors)
 - ✅ FileSystemStorage (full CRUD + metadata)
 - ✅ JSONPointer utilities
-- ✅ ValidationService (validate + apply_defaults)
-- ✅ SchemaService (load schema)
+- ✅ ValidationService (validate + apply_defaults + check_required_defaults)
+- ✅ SchemaService (load schema + $ref resolution + schema introspection)
 
 **Approach**: True TDD - write ONE test, make it pass, refactor, commit
 
@@ -343,10 +484,10 @@
 
 - [ ] **P1.1.1** Test: create_document returns doc_id and version
   - **TEST**: Add to `tests/lib/services/test_document_service.py`
-    - Test: `test_create_document_returns_doc_id_and_version(document_service, valid_minimal_doc)`
-      - Call `create_document("text", valid_minimal_doc)`
+    - Test: `test_create_document_returns_doc_id_and_version(document_service)`
+      - Call `create_document()` with NO arguments
       - Assert returns tuple of (str, int)
-      - Assert version == 1
+      - Assert version == 1 (initial version)
   - **Acceptance**: Test written and FAILS
   - **Commit**: `"test(services): add create_document return value test (failing)"`
 
@@ -354,15 +495,16 @@
   - **IMPL**: Create `lib/json_schema_core/services/document_service.py`
     - Class: `DocumentService`
     - Method: `__init__(self, storage: StorageInterface, validation_service: ValidationService, schema_service: SchemaService)`
-    - Method: `async def create_document(self, schema_name: str, content: dict) -> tuple[str, int]`
+    - Method: `async def create_document(self) -> tuple[str, int]`
+      - Takes NO arguments (schema already loaded, doc_id auto-generated)
       - Minimal implementation: return ("placeholder", 1)
   - **Acceptance**: Test PASSES with placeholder
   - **Commit**: `"feat(services): add DocumentService skeleton with create_document stub"`
 
 - [ ] **P1.1.3** Test: create_document generates valid ULID
   - **TEST**: Add test
-    - Test: `test_create_document_generates_valid_ulid(document_service, valid_minimal_doc)`
-      - Call create_document
+    - Test: `test_create_document_generates_valid_ulid(document_service)`
+      - Call create_document()
       - Assert doc_id matches ULID format (26 chars, uppercase alphanumeric)
       - Assert doc_id is unique on repeated calls
   - **Acceptance**: Test FAILS (placeholder doesn't generate ULID)
@@ -378,25 +520,27 @@
 - [ ] **P1.1.5** Test: create_document applies schema defaults
   - **TEST**: Add test
     - Test: `test_create_document_applies_defaults(document_service)`
-      - Call create_document with minimal doc (no sections field)
+      - Schema has field with default value (e.g., sections: [])
+      - Call create_document()
       - Read document back from storage
-      - Assert document has `sections: []` default applied
+      - Assert document has defaults applied from schema
   - **Acceptance**: Test FAILS
   - **Commit**: `"test(services): add schema defaults test (failing)"`
 
 - [ ] **P1.1.6** Implement: Apply schema defaults before saving
   - **IMPL**: Update `create_document()`
-    - Call `validation_service.apply_defaults(content)`
-    - Use returned document with defaults
+    - Get loaded schema from schema_service
+    - Call `validation_service.apply_defaults(empty_dict, schema)`
+    - Use returned document with defaults as initial content
   - **Acceptance**: Test PASSES
   - **Commit**: `"feat(services): apply schema defaults in create_document"`
 
 - [ ] **P1.1.7** Test: create_document saves to storage
   - **TEST**: Add test
-    - Test: `test_create_document_saves_to_storage(document_service, valid_minimal_doc, storage)`
-      - Call create_document
-      - Read document directly from storage using doc_id
-      - Assert document content matches (with defaults applied)
+    - Test: `test_create_document_saves_to_storage(document_service, storage)`
+      - Call create_document()
+      - Read document directly from storage using returned doc_id
+      - Assert document content exists with defaults applied
   - **Acceptance**: Test FAILS
   - **Commit**: `"test(services): add storage persistence test (failing)"`
 
@@ -408,17 +552,17 @@
 
 - [ ] **P1.1.9** Test: create_document saves metadata
   - **TEST**: Add test
-    - Test: `test_create_document_saves_metadata(document_service, valid_minimal_doc, storage)`
-      - Call create_document
-      - Read metadata from storage
-      - Assert metadata has doc_id, version=1, created_at, updated_at
+    - Test: `test_create_document_saves_metadata(document_service, storage)`
+      - Call create_document()
+      - Read metadata from storage using returned doc_id
+      - Assert metadata has doc_id, version=1, created_at, updated_at, schema_uri
       - Assert created_at == updated_at for new document
   - **Acceptance**: Test FAILS
   - **Commit**: `"test(services): add metadata persistence test (failing)"`
 
 - [ ] **P1.1.10** Implement: Create and save metadata
   - **IMPL**: Update `create_document()`
-    - Create DocumentMetadata with version=1, current timestamps
+    - Create DocumentMetadata with version=1, current timestamps, schema_uri
     - Call `storage.write_metadata(doc_id, metadata.to_dict())`
   - **Acceptance**: Test PASSES
   - **Commit**: `"feat(services): persist document metadata"`
@@ -427,16 +571,34 @@
 
 ### 1.2 DocumentService - create_document (Error Handling) [~1 hour]
 
-- [ ] **P1.2.1** Test: create_document validates against schema
+- [ ] **P1.2.1** Test: create_document fails for required fields without defaults
   - **TEST**: Add test
-    - Test: `test_create_document_validates_schema(document_service, invalid_doc_missing_title)`
-      - Call create_document with invalid doc
-      - Assert raises ValidationFailedError
-      - Assert error contains validation details
+    - Test: `test_create_document_required_field_no_default(document_service)`
+      - Configure schema with required field "title" without default value
+      - Call create_document()
+      - Assert raises RequiredFieldWithoutDefaultError
+      - Assert error lists all missing required fields
   - **Acceptance**: Test FAILS (no validation yet)
-  - **Commit**: `"test(services): add validation test (failing)"`
+  - **Commit**: `"test(services): add required field without default test (failing)"`
 
-- [ ] **P1.2.2** Implement: Validate document before saving
+- [ ] **P1.2.2** Implement: Check for required fields without defaults
+  - **IMPL**: Update `create_document()`
+    - Before applying defaults, check if schema has required fields without defaults
+    - Call `validation_service.check_required_defaults(schema)`
+    - Raise RequiredFieldWithoutDefaultError if found
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(services): fail on required fields without defaults"`
+
+- [ ] **P1.2.3** Test: create_document validates initialized document
+  - **TEST**: Add test
+    - Test: `test_create_document_validates_after_defaults(document_service)`
+      - Mock schema where defaults create invalid document (edge case)
+      - Call create_document()
+      - Assert raises ValidationFailedError with details
+  - **Acceptance**: Test FAILS
+  - **Commit**: `"test(services): add post-initialization validation test (failing)"`
+
+- [ ] **P1.2.4** Implement: Validate document after applying defaults
   - **IMPL**: Update `create_document()`
     - Call `validation_service.validate(document_with_defaults)` before storage
   - **Acceptance**: Test PASSES
@@ -787,14 +949,94 @@
   - **Acceptance**: Test PASSES
   - **Commit**: `"test(services): verify optimistic locking prevents conflicts"`
 
+---
+
+### 1.11 LockService - Document-Level Locking [~2 hours]
+
+**Goal**: Implement document-level optimistic locking with in-memory lock map
+
+- [ ] **P1.11.1** Test: LockService - acquire and release lock
+  - **TEST**: Create `tests/lib/services/test_lock_service.py`
+    - Test: `test_acquire_lock_success()` - Acquire lock for doc_id
+    - Test: `test_release_lock()` - Release acquired lock
+    - Test: `test_acquire_already_locked()` - Second acquire blocks/timeouts
+  - **IMPL**: Create `lib/json_schema_core/services/lock_service.py`
+    - Class: `LockService`
+    - Method: `__init__(self, lock_timeout: float = 10.0)`
+    - Method: `acquire_lock(self, doc_id: str) -> None` - Blocks up to timeout
+    - Method: `release_lock(self, doc_id: str) -> None`
+    - Use threading.Lock with timeout
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): add LockService with acquire/release"`
+
+- [ ] **P1.11.2** Test: Lock timeout after 10 seconds
+  - **TEST**: Add test
+    - Test: `test_lock_timeout()` - Lock acquisition fails after 10s
+      - Acquire lock in thread 1
+      - Try to acquire same lock in thread 2
+      - Assert raises LockTimeoutError after ~10 seconds
+  - **IMPL**: Update `acquire_lock()`
+    - Implement timeout logic
+    - Raise LockTimeoutError if cannot acquire within timeout
+  - **Acceptance**: Test passes
+  - **Commit**: `"feat(services): add 10-second lock timeout"`
+
+- [ ] **P1.11.3** Test: Concurrent operations serialized per document
+  - **TEST**: Add test
+    - Test: `test_concurrent_writes_serialized()` - Two writes to same doc serialize
+    - Test: `test_concurrent_writes_different_docs()` - Writes to different docs don't block
+  - **IMPL**: Update `LockService`
+    - Use dict of locks keyed by doc_id
+    - Ensure per-document isolation
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): serialize writes per document only"`
+
+- [ ] **P1.11.4** Test: Lock released on operation completion/failure
+  - **TEST**: Add test
+    - Test: `test_lock_released_on_success()` - Lock freed after successful write
+    - Test: `test_lock_released_on_error()` - Lock freed even if operation fails
+  - **IMPL**: Create context manager
+    - Class: `DocumentLock` context manager
+    - Ensures lock released in __exit__
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): ensure lock cleanup with context manager"`
+
+- [ ] **P1.11.5** Integrate LockService into DocumentService writes
+  - **TEST**: Add test
+    - Test: `test_update_node_acquires_lock(document_service, lock_service)`
+      - Mock lock_service
+      - Call update_node
+      - Verify acquire_lock called before write
+      - Verify release_lock called after
+  - **IMPL**: Update DocumentService
+    - Add lock_service parameter to __init__
+    - Wrap update_node, create_node, delete_node with lock acquisition
+    - Use DocumentLock context manager
+  - **Acceptance**: Tests pass
+  - **Commit**: `"feat(services): integrate locking into write operations"`
+
+- [ ] **P1.11.6** Test: Lock timeout returns clear error
+  - **TEST**: Add test
+    - Test: `test_lock_timeout_error_message(document_service)`
+      - Simulate lock timeout scenario
+      - Assert error code is "lock-timeout"
+      - Assert error message explains retry needed
+  - **IMPL**: Update error handling
+    - Catch LockTimeoutError in write operations
+    - Return structured error with guidance
+  - **Acceptance**: Test passes
+  - **Commit**: `"feat(services): add lock-timeout error handling"`
+
 **🎯 Phase 1 Complete When:**
 - ✅ DocumentService fully implemented with ALL CRUD methods
-- ✅ All unit tests passing (40+ tests)
+- ✅ LockService implemented with document-level locking
+- ✅ All unit tests passing (50+ tests)
 - ✅ Integration tests passing
-- ✅ 100% test coverage on DocumentService
+- ✅ 100% test coverage on DocumentService and LockService
 - ✅ Can run `pytest tests/lib/services/test_document_service.py -v` - ALL GREEN
 - ✅ Each method tested for: happy path, error handling, edge cases
-- ✅ Optimistic locking verified
+- ✅ Optimistic locking verified with 10-second timeout
+- ✅ Concurrent operations properly serialized per document
 - ✅ Ready to build interface layers (MCP + REST) in Phase 2
 
 ---
@@ -803,7 +1045,7 @@
 
 **Goal**: Complete configuration system and add code quality tools
 
-**Prerequisites**: Phase 1 complete - DocumentService fully implemented
+**Prerequisites**: Phase 1 complete - DocumentService fully implemented with locking
 
 ---
 
@@ -1033,9 +1275,55 @@
 
 ---
 
-### 2.6 Development Tools - Linting & Formatting [~1 hour]
+### 2.6 Error Code Catalog Documentation [~1 hour]
 
-- [ ] **P2.6.1** Configure Ruff linter and formatter
+**Goal**: Create exhaustive error code enumeration per FR-096 to FR-100
+
+- [ ] **P2.6.1** Create comprehensive error code catalog
+  - **IMPL**: Create `docs/api/error-codes.md`
+    - Document ALL error codes with structure:
+      - Code: kebab-case identifier (e.g., "document-not-found")
+      - Category: 4xx (client error) or 5xx (server error)
+      - Description: What this error means
+      - Typical Causes: Common scenarios triggering this
+      - Remediation: How to fix/avoid
+    - Include codes:
+      - document-not-found (404)
+      - path-not-found (404) - with deepest ancestor guidance
+      - version-conflict (409) - with current version
+      - lock-timeout (408)
+      - required-field-without-default (400)
+      - validation-failed (400)
+      - schema-resolution-failed (500)
+      - storage-read-failed (500)
+      - storage-write-failed (500)
+      - configuration-error (500)
+  - **Acceptance**: File created with all codes
+  - **Commit**: `"docs: add comprehensive error code catalog"`
+
+- [ ] **P2.6.2** Test: All exceptions map to documented codes
+  - **TEST**: Create `tests/lib/domain/test_error_codes.py`
+    - Test: `test_all_exceptions_have_error_codes()`
+      - Get all custom exception classes
+      - Verify each has error_code attribute
+      - Verify code exists in error-codes.md
+  - **IMPL**: Update all domain exceptions to include error_code
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(domain): ensure all exceptions have documented codes"`
+
+- [ ] **P2.6.3** Add error code versioning
+  - **IMPL**: Update `docs/api/error-codes.md`
+    - Add version header: "Error Codes v1.0"
+    - Add stability guarantee note
+    - Document that existing codes won't change meaning
+  - **Acceptance**: Documentation includes versioning
+  - **Commit**: `"docs: add error code versioning and stability"`
+
+---
+
+### 2.7 Development Tools - Linting & Formatting [~1 hour]
+
+- [ ] **P2.7.1** Configure Ruff linter and formatter
   - **IMPL**: Update `pyproject.toml`
     - Add `ruff` to dev dependencies
     - Add `[tool.ruff]` section
@@ -1045,7 +1333,7 @@
   - **Acceptance**: Can run `ruff check lib/ tests/`
   - **Commit**: `"chore: configure Ruff linter and formatter"`
 
-- [ ] **P2.6.2** Run Ruff and fix issues
+- [ ] **P2.7.2** Run Ruff and fix issues
   - **IMPL**: Run `ruff check --fix lib/ tests/`
     - Fix any issues found
     - Run `ruff format lib/ tests/`
@@ -1054,9 +1342,9 @@
 
 ---
 
-### 2.7 Development Tools - Type Checking [~30 minutes]
+### 2.8 Development Tools - Type Checking [~30 minutes]
 
-- [ ] **P2.7.1** Configure MyPy type checker
+- [ ] **P2.8.1** Configure MyPy type checker
   - **IMPL**: Update `pyproject.toml`
     - Add `mypy` to dev dependencies
     - Add `[tool.mypy]` section
@@ -1066,7 +1354,7 @@
   - **Acceptance**: Can run `mypy lib/`
   - **Commit**: `"chore: configure MyPy type checker"`
 
-- [ ] **P2.7.2** Fix type issues
+- [ ] **P2.8.2** Fix type issues
   - **IMPL**: Run `mypy lib/` and fix issues
     - Add missing type hints
     - Fix type mismatches
@@ -1075,9 +1363,9 @@
 
 ---
 
-### 2.8 Development Tools - Pre-commit Hooks [~30 minutes]
+### 2.9 Development Tools - Pre-commit Hooks [~30 minutes]
 
-- [ ] **P2.8.1** Configure pre-commit hooks
+- [ ] **P2.9.1** Configure pre-commit hooks
   - **IMPL**: 
     - Add `pre-commit` to dev dependencies
     - Create `.pre-commit-config.yaml`
@@ -1085,7 +1373,7 @@
   - **Acceptance**: File created
   - **Commit**: `"chore: configure pre-commit hooks"`
 
-- [ ] **P2.8.2** Install and test pre-commit
+- [ ] **P2.9.2** Install and test pre-commit
   - **IMPL**: Run `pre-commit install`
     - Run `pre-commit run --all-files`
     - Fix any issues
@@ -1244,9 +1532,9 @@
 - [ ] **P3.4.1** Test: POST /documents creates document
   - **TEST**: Create `tests/apps/rest_api/test_documents.py`
     - Test: `test_create_document_success(client)`
-      - POST /documents with valid data
+      - POST /documents (NO request body - auto-generates doc_id)
       - Assert status_code == 201
-      - Assert response has doc_id and version
+      - Assert response has doc_id and version (version == 1)
   - **Acceptance**: Test FAILS
   - **Commit**: `"test(rest): add create document test (failing)"`
 
@@ -1254,20 +1542,22 @@
   - **IMPL**: Create `apps/rest_api/routes/documents.py`
     - Router: `router = APIRouter(prefix="/documents", tags=["documents"])`
     - Endpoint: `@router.post("/", status_code=201, response_model=CreateDocumentResponse)`
-    - Call: `document_service.create_document()`
-    - Return: CreateDocumentResponse
+    - Call: `document_service.create_document()` (NO arguments)
+    - Return: CreateDocumentResponse with doc_id and version
   - **IMPL**: Update `app.py` to include documents router
   - **Acceptance**: Test PASSES
   - **Commit**: `"feat(rest): add POST /documents endpoint"`
 
-- [ ] **P3.4.3** Test: POST /documents validation error returns 400
+- [ ] **P3.4.3** Test: POST /documents handles required fields without defaults
   - **TEST**: Add test
-    - Test: `test_create_document_validation_error(client)`
-      - POST /documents with invalid data
+    - Test: `test_create_document_required_field_error(client)`
+      - Configure schema with required field without default
+      - POST /documents
       - Assert status_code == 400
-      - Assert response has error details
+      - Assert error code is "required-field-without-default"
+      - Assert error lists missing required fields
   - **Acceptance**: Test FAILS
-  - **Commit**: `"test(rest): add validation error test (failing)"`
+  - **Commit**: `"test(rest): add required field without default test (failing)"`
 
 - [ ] **P3.4.4** Implement: Exception handler for validation errors
   - **IMPL**: Create `apps/rest_api/middleware.py`
@@ -1486,9 +1776,74 @@
 
 ---
 
-### 3.10 REST API Entry Point [~1 hour]
+### 3.10 Schema Introspection Endpoints [~1.5 hours]
 
-- [ ] **P3.10.1** Create __main__.py for REST API
+**Goal**: Implement schema introspection for User Story 3
+
+- [ ] **P3.10.1** Test: GET /schema/node endpoint
+  - **TEST**: Create `tests/apps/rest_api/test_schema.py`
+    - Test: `test_get_schema_node_root(client)`
+      - GET /schema/node?path=/&dereferenced=true
+      - Assert status_code == 200
+      - Assert returns root schema definition
+    - Test: `test_get_schema_node_nested(client)`
+      - GET /schema/node?path=/metadata/title
+      - Assert returns title field schema
+  - **Acceptance**: Test FAILS
+  - **Commit**: `"test(rest): add schema node endpoint test (failing)"`
+
+- [ ] **P3.10.2** Implement: GET /schema/node endpoint
+  - **IMPL**: Create `apps/rest_api/routes/schema.py`
+    - Router: `router = APIRouter(prefix="/schema", tags=["schema"])`
+    - Endpoint: `@router.get("/node")`
+    - Query params: `path: str = Query(default="/")`, `dereferenced: bool = Query(default=True)`
+    - Call: `schema_service.get_node_schema(path, dereferenced)`
+    - Return: `{"schema": schema_dict}`
+  - **IMPL**: Update `app.py` to include schema router
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(rest): add GET /schema/node endpoint"`
+
+- [ ] **P3.10.3** Test: GET /schema/node with invalid path
+  - **TEST**: Add test
+    - Test: `test_get_schema_node_invalid_path(client)`
+      - GET /schema/node?path=/invalid/path
+      - Assert status_code == 404
+      - Assert error message is helpful
+  - **Acceptance**: Test FAILS
+  - **Commit**: `"test(rest): add invalid schema path test (failing)"`
+
+- [ ] **P3.10.4** Implement: Schema path error handling
+  - **IMPL**: Update `middleware.py`
+    - Exception handler: `@app.exception_handler(SchemaPathNotFoundError)`
+    - Return HTTPException(404, detail=...)
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(rest): add schema path error handling"`
+
+- [ ] **P3.10.5** Test: GET /schema (root schema) endpoint
+  - **TEST**: Add test
+    - Test: `test_get_root_schema_dereferenced(client)`
+      - GET /schema?dereferenced=true
+      - Assert returns full schema with $refs resolved
+    - Test: `test_get_root_schema_raw(client)`
+      - GET /schema?dereferenced=false
+      - Assert returns schema with $refs intact
+  - **Acceptance**: Test FAILS
+  - **Commit**: `"test(rest): add root schema endpoint test (failing)"`
+
+- [ ] **P3.10.6** Implement: GET /schema endpoint
+  - **IMPL**: Update `routes/schema.py`
+    - Endpoint: `@router.get("/")`
+    - Query param: `dereferenced: bool = Query(default=True)`
+    - Call: `schema_service.get_root_schema(dereferenced)`
+    - Return: `{"schema": schema_dict, "schema_uri": uri}`
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(rest): add GET /schema endpoint"`
+
+---
+
+### 3.11 REST API Entry Point [~1 hour]
+
+- [ ] **P3.11.1** Create __main__.py for REST API
   - **IMPL**: Create `apps/rest_api/__main__.py`
     - Load configuration
     - Create app
@@ -1496,24 +1851,26 @@
   - **Acceptance**: Can run `python -m apps.rest_api`
   - **Commit**: `"feat(rest): add server entry point"`
 
-- [ ] **P3.10.2** Test: Can start server programmatically
+- [ ] **P3.11.2** Test: Can start server programmatically
   - **TEST**: Create `tests/apps/rest_api/test_server.py`
     - Test: `test_server_starts()`
       - Import and create app
       - Assert app is FastAPI instance
-      - Assert has all routes registered
+      - Assert has all routes registered (including schema routes)
   - **Acceptance**: Test PASSES
   - **Commit**: `"test(rest): verify server startup"`
 
 ---
 
-### 3.11 REST API Integration Tests [~1 hour]
+### 3.12 REST API Integration Tests [~1 hour]
 
-- [ ] **P3.11.1** Integration test: Full document lifecycle via REST
+- [ ] **P3.12.1** Integration test: Full document lifecycle via REST
   - **TEST**: Create `tests/apps/rest_api/test_integration.py`
     - Test: `test_full_document_lifecycle_rest(client)`
       - POST /documents - create
+      - GET /schema/node?path=/ - get root schema
       - GET /documents/{doc_id}/nodes - read
+      - GET /schema/node?path=/title - get field schema  
       - PUT /documents/{doc_id}/nodes - update
       - POST /documents/{doc_id}/nodes - create node
       - DELETE /documents/{doc_id}/nodes - delete node
@@ -1522,18 +1879,28 @@
   - **Acceptance**: Test PASSES
   - **Commit**: `"test(rest): add full lifecycle integration test"`
 
-- [ ] **P3.11.2** Integration test: Error handling
+- [ ] **P3.12.2** Integration test: Error handling
   - **TEST**: Add test
     - Test: `test_error_handling_integration(client)`
       - Test 404 for missing document
-      - Test 400 for validation error
+      - Test 400 for validation error (required field without default)
       - Test 409 for version conflict
       - Test 404 for invalid path
+      - Test 404 for invalid schema path
   - **Acceptance**: Test PASSES
   - **Commit**: `"test(rest): add error handling integration test"`
 
 **🎯 Phase 3 Complete When:**
 - ✅ REST API fully functional
+- ✅ All CRUD endpoints implemented (CREATE, READ, UPDATE, CREATE_NODE, DELETE, LIST)
+- ✅ Schema introspection endpoints implemented (GET /schema, GET /schema/node)
+- ✅ All exception handlers implemented
+- ✅ All tests passing (35+ tests)
+- ✅ Integration tests passing
+- ✅ Can run REST API: `python -m apps.rest_api`
+- ✅ API documented with OpenAPI/Swagger at /docs
+- ✅ User Story 3 (schema introspection) deliverable via REST
+- ✅ Ready to build MCP interface
 - ✅ All CRUD endpoints implemented (CREATE, READ, UPDATE, DELETE, LIST)
 - ✅ All exception handlers implemented
 - ✅ All tests passing (30+ tests)
@@ -1637,35 +2004,37 @@
 - [ ] **P4.2.1** Test: document_create tool
   - **TEST**: Create `tests/apps/mcp_server/test_document_tools.py`
     - Test: `test_document_create_success(mcp_server, document_service)`
-      - Call tool: document_create(schema_name="text", content={...})
-      - Assert returns dict with doc_id and version
+      - Call tool: document_create() with NO arguments
+      - Assert returns dict with doc_id and version (version == 1)
+      - Verify doc_id is valid ULID format (26 chars)
       - Verify document created via document_service
   - **Acceptance**: Test FAILS
   - **Commit**: `"test(mcp): add document_create test (failing)"`
 
 - [ ] **P4.2.2** Implement: document_create tool
   - **IMPL**: Create `apps/mcp_server/tools/document_tools.py`
-    - Function: `async def document_create(schema_name: str, content: dict, server: MCPServer) -> dict`
-      - Call: `server.document_service.create_document(schema_name, content)`
+    - Function: `async def document_create(server: MCPServer) -> dict`
+      - Call: `server.document_service.create_document()` (NO arguments)
       - Catch exceptions and convert to MCP error format
       - Return: `{"doc_id": str(doc_id), "version": version}`
-  - **IMPL**: Update `server.py` to register tool
+  - **IMPL**: Update `server.py` to register tool with empty input schema
   - **Acceptance**: Test PASSES
   - **Commit**: `"feat(mcp): implement document_create tool"`
 
-- [ ] **P4.2.3** Test: document_create validation error
+- [ ] **P4.2.3** Test: document_create handles required fields without defaults
   - **TEST**: Add test
-    - Test: `test_document_create_validation_error(mcp_server)`
-      - Call with invalid content
-      - Assert returns error response (not exception)
-      - Assert error has details
+    - Test: `test_document_create_required_field_error(mcp_server)`
+      - Configure schema with required field without default
+      - Call document_create()
+      - Assert returns error response with code "required-field-without-default"
+      - Assert error lists all missing required fields
   - **Acceptance**: Test FAILS
-  - **Commit**: `"test(mcp): add validation error test (failing)"`
+  - **Commit**: `"test(mcp): add required field without default test (failing)"`
 
 - [ ] **P4.2.4** Implement: Error handling for document_create
   - **IMPL**: Update `document_create()`
-    - Wrap in try/except for ValidationFailedError
-    - Return error dict: `{"error": "ValidationError", "message": ..., "details": ...}`
+    - Wrap in try/except for RequiredFieldWithoutDefaultError
+    - Return error dict: `{"error": "required-field-without-default", "message": ..., "missing_fields": [...]}`
   - **Acceptance**: Test PASSES
   - **Commit**: `"feat(mcp): add error handling to document_create"`
 
@@ -1867,9 +2236,78 @@
 
 ---
 
-### 4.8 MCP Server Entry Point [~1 hour]
+### 4.8 MCP Tools - SCHEMA Introspection [~1.5 hours]
 
-- [ ] **P4.8.1** Create __main__.py for MCP server
+**Goal**: Implement schema introspection tools for User Story 3
+
+- [ ] **P4.8.1** Test: schema_get_node tool
+  - **TEST**: Create `tests/apps/mcp_server/test_schema_tools.py`
+    - Test: `test_schema_get_node_root(mcp_server)`
+      - Call tool: schema_get_node(node_path="/", dereferenced=True)
+      - Assert returns root schema definition
+    - Test: `test_schema_get_node_nested(mcp_server)`
+      - Call schema_get_node(node_path="/metadata/title", dereferenced=True)
+      - Assert returns title field schema
+  - **Acceptance**: Test FAILS
+  - **Commit**: `"test(mcp): add schema_get_node test (failing)"`
+
+- [ ] **P4.8.2** Implement: schema_get_node tool
+  - **IMPL**: Create `apps/mcp_server/tools/schema_tools.py`
+    - Function: `async def schema_get_node(node_path: str, dereferenced: bool = True, server: MCPServer) -> dict`
+      - Call: `server.schema_service.get_node_schema(node_path, dereferenced)`
+      - Return: `{"schema": schema_dict}`
+  - **IMPL**: Register tool in server
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(mcp): implement schema_get_node tool"`
+
+- [ ] **P4.8.3** Test: schema_get_node with polymorphic schemas
+  - **TEST**: Add test
+    - Test: `test_schema_get_node_oneOf(mcp_server)`
+      - Request schema for path with oneOf definition
+      - Assert returns all type options
+  - **Acceptance**: Test PASSES (SchemaService handles this)
+  - **Commit**: `"test(mcp): verify polymorphic schema handling"`
+
+- [ ] **P4.8.4** Test: schema_get_node error handling
+  - **TEST**: Add test
+    - Test: `test_schema_get_node_invalid_path(mcp_server)`
+      - Call with invalid JSON Pointer path
+      - Assert returns error response
+  - **Acceptance**: Test FAILS
+  - **Commit**: `"test(mcp): add schema path error test (failing)"`
+
+- [ ] **P4.8.5** Implement: Error handling for schema_get_node
+  - **IMPL**: Update `schema_get_node()`
+    - Catch PathNotFoundError
+    - Return error dict with guidance
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(mcp): add error handling to schema_get_node"`
+
+- [ ] **P4.8.6** Test: schema_get_root tool
+  - **TEST**: Add test
+    - Test: `test_schema_get_root_dereferenced(mcp_server)`
+      - Call tool: schema_get_root(dereferenced=True)
+      - Assert returns full schema with $refs resolved
+    - Test: `test_schema_get_root_raw(mcp_server)`
+      - Call schema_get_root(dereferenced=False)
+      - Assert returns schema with $refs intact
+  - **Acceptance**: Test FAILS
+  - **Commit**: `"test(mcp): add schema_get_root test (failing)"`
+
+- [ ] **P4.8.7** Implement: schema_get_root tool
+  - **IMPL**: Update `schema_tools.py`
+    - Function: `async def schema_get_root(dereferenced: bool = True, server: MCPServer) -> dict`
+      - Call: `server.schema_service.get_root_schema(dereferenced)`
+      - Return: `{"schema": schema_dict, "schema_uri": uri}`
+  - **IMPL**: Register tool
+  - **Acceptance**: Test PASSES
+  - **Commit**: `"feat(mcp): implement schema_get_root tool"`
+
+---
+
+### 4.9 MCP Server Entry Point [~1 hour]
+
+- [ ] **P4.9.1** Create __main__.py for MCP server
   - **IMPL**: Create `apps/mcp_server/__main__.py`
     - Load configuration (from file or env vars)
     - Initialize MCPServer with config
@@ -1878,7 +2316,7 @@
   - **Acceptance**: Can import and run module
   - **Commit**: `"feat(mcp): add server entry point"`
 
-- [ ] **P4.8.2** Test: Can start server programmatically
+- [ ] **P4.9.2** Test: Can start server programmatically
   - **TEST**: Create `tests/apps/mcp_server/test_main.py`
     - Test: `test_server_starts()`
       - Import main module
@@ -1890,10 +2328,10 @@
 
 ---
 
-### 4.9 MCP Tool Descriptions & Schema [~1 hour]
+### 4.10 MCP Tool Descriptions & Schema [~1 hour]
 
-- [ ] **P4.9.1** Add tool descriptions
-  - **IMPL**: Update `document_tools.py`
+- [ ] **P4.10.1** Add tool descriptions
+  - **IMPL**: Update `document_tools.py` and `schema_tools.py`
     - Add docstrings to all tool functions
     - Include parameter descriptions
     - Include return value descriptions
@@ -1901,7 +2339,7 @@
   - **Acceptance**: All tools documented
   - **Commit**: `"docs(mcp): add tool descriptions"`
 
-- [ ] **P4.9.2** Add input schemas for tools
+- [ ] **P4.10.2** Add input schemas for tools
   - **IMPL**: Update tool registrations
     - Define input schemas using MCP SDK
     - Specify required vs optional parameters
@@ -1910,10 +2348,10 @@
   - **Acceptance**: Tools have complete schemas
   - **Commit**: `"feat(mcp): add tool input schemas"`
 
-- [ ] **P4.9.3** Test: Tool schemas are valid
+- [ ] **P4.10.3** Test: Tool schemas are valid
   - **TEST**: Add test
     - Test: `test_tool_schemas_valid(mcp_server)`
-      - Inspect registered tools
+      - Inspect registered tools (including schema tools)
       - Assert all have schemas
       - Assert schemas are valid
   - **Acceptance**: Test PASSES
@@ -1921,23 +2359,86 @@
 
 ---
 
-### 4.10 MCP Integration Tests [~1 hour]
+### 4.11 MCP Resources - Document Export [~1 hour]
 
-- [ ] **P4.10.1** Integration test: Full document lifecycle via MCP
+**Goal**: Expose documents as MCP resources with URIs for export/linking
+
+- [ ] **P4.11.1** Test: List documents as MCP resources
+  - **TEST**: Create `tests/apps/mcp_server/test_mcp_resources.py`
+    - Test: `test_list_resources_returns_documents(mcp_server)`
+      - Create 3 test documents
+      - Call MCP resources/list
+      - Assert 3 resources returned
+      - Assert each has uri: `document://{doc_id}`
+      - Assert each has name: document title or doc_id
+      - Assert each has mimeType: `application/json`
+  - **Acceptance**: FAIL - No resources handler yet
+  - **Commit**: `"test(mcp): add resource listing test"`
+
+- [ ] **P4.11.2** Implement: Register resources handler
+  - **IMPL**: Create `apps/mcp_server/resources.py`
+    - Function: `async def list_resources() -> list[Resource]`
+      - Call `document_service.list_documents()`
+      - For each doc_id:
+        - Get document metadata for title
+        - Create Resource(uri=f"document://{doc_id}", name=title_or_id, mimeType="application/json")
+      - Return list
+    - Register handler with MCP server in `server.py`
+  - **Acceptance**: Test from P4.11.1 PASSES
+  - **Commit**: `"feat(mcp): implement resources/list handler"`
+
+- [ ] **P4.11.3** Test: Read document by resource URI
+  - **TEST**: Add to `test_mcp_resources.py`
+    - Test: `test_read_resource_by_uri(mcp_server)`
+      - Create test document, get doc_id
+      - Call MCP resources/read with uri: `document://{doc_id}`
+      - Assert returns document content as JSON string
+      - Assert mimeType: `application/json`
+  - **Acceptance**: FAIL - No read handler yet
+  - **Commit**: `"test(mcp): add resource read test"`
+
+- [ ] **P4.11.4** Implement: Read resource handler
+  - **IMPL**: Update `apps/mcp_server/resources.py`
+    - Function: `async def read_resource(uri: str) -> str`
+      - Parse URI to extract doc_id (format: `document://{doc_id}`)
+      - Call `document_service.read_node(doc_id, "/")`
+      - Return JSON string of document
+    - Register handler with MCP server
+  - **Acceptance**: Test from P4.11.3 PASSES
+  - **Commit**: `"feat(mcp): implement resources/read handler"`
+
+- [ ] **P4.11.5** Test: Resource URIs work with Claude Desktop
+  - **TEST**: Manual test (documented in test file)
+    - Start MCP server
+    - Configure in Claude Desktop
+    - Create document via tool
+    - Ask Claude to "show me document X"
+    - Verify Claude can access via resource URI
+    - Document expected behavior in test docstring
+  - **Acceptance**: Manual verification documented
+  - **Commit**: `"test(mcp): document resource URI manual test"`
+
+---
+
+### 4.12 MCP Integration Tests [~1 hour]
+
+- [ ] **P4.12.1** Integration test: Full document lifecycle via MCP
   - **TEST**: Create `tests/apps/mcp_server/test_integration.py`
     - Test: `test_full_document_lifecycle_mcp(mcp_server)`
       - document_create - create
       - document_read_node - read root
+      - schema_get_node - get schema for path
       - document_update_node - update field
       - document_read_node - verify update
       - document_create_node - add section
       - document_delete_node - remove section
       - document_list - list all
+      - schema_get_root - get full schema
       - Verify final state
   - **Acceptance**: Test PASSES
   - **Commit**: `"test(mcp): add full lifecycle integration test"`
 
-- [ ] **P4.10.2** Integration test: Error handling across tools
+- [ ] **P4.12.2** Integration test: Error handling across tools
   - **TEST**: Add test
     - Test: `test_error_handling_integration_mcp(mcp_server)`
       - Test DocumentNotFoundError
@@ -1950,48 +2451,58 @@
 
 ---
 
-### 4.11 MCP vs REST Comparison Test [~30 minutes]
+### 4.13 MCP vs REST Comparison Test [~30 minutes]
 
-- [ ] **P4.11.1** Test: MCP and REST produce identical results
+- [ ] **P4.13.1** Test: MCP and REST produce identical results
   - **TEST**: Create `tests/integration/test_mcp_rest_parity.py`
     - Test: `test_mcp_rest_create_parity(mcp_server, rest_client)`
-      - Create same document via MCP and REST
+      - Create documents via MCP and REST
       - Assert both succeed
-      - Assert versions match
+      - Assert versions match (both start at 1)
     - Test: `test_mcp_rest_read_parity(...)`
       - Create document
       - Read via MCP and REST
       - Assert results identical
+    - Test: `test_mcp_rest_schema_parity(...)`
+      - Get schema via MCP schema_get_node and REST GET /schema/node
+      - Assert returns identical schema
     - Test: `test_mcp_rest_update_parity(...)`
       - Update via both interfaces
       - Verify same final state
   - **Acceptance**: Test PASSES - proves zero duplication
-  - **Commit**: `"test(integration): verify MCP/REST parity"`
+  - **Commit**: `"test(integration): verify MCP/REST parity including schema ops"`
 
 **🎯 Phase 4 Complete When:**
 - ✅ MCP server fully functional
-- ✅ All document CRUD tools implemented (6 tools)
+- ✅ All document CRUD tools implemented (6 tools: create, read, update, create_node, delete_node, list)
+- ✅ All schema introspection tools implemented (2 tools: schema_get_node, schema_get_root)
+- ✅ MCP resources implemented (document:// URIs for export)
 - ✅ All tools have descriptions and schemas
-- ✅ All tests passing (25+ tests)
+- ✅ All tests passing (35+ tests)
 - ✅ Integration tests passing
 - ✅ Error handling consistent with REST API
 - ✅ Can run MCP server: `python -m apps.mcp_server`
 - ✅ MCP and REST produce identical results (zero duplication verified)
-- ✅ Project complete: Dual interface (MCP + REST) sharing DocumentService
+- ✅ User Story 3 (schema introspection) deliverable
+- ✅ Project complete: Dual interface (MCP + REST) sharing DocumentService and SchemaService
 
 ---
 
 ## 🎉 Project Complete!
 
 All phases restructured with micro-step TDD approach:
-- **Phase 0**: Core library foundation (50+ tasks)
-- **Phase 1**: DocumentService implementation (50 tasks)
-- **Phase 2**: Configuration management & dev tools (30+ tasks)
-- **Phase 3**: REST API interface layer (50+ tasks)
-- **Phase 4**: MCP interface layer (40+ tasks)
+- **Phase 0**: Core library foundation (55+ tasks) - includes schema loading, durability guarantees
+- **Phase 1**: DocumentService implementation (50 tasks) - includes optimistic locking
+- **Phase 2**: Configuration management & dev tools (35+ tasks) - includes error code catalog
+- **Phase 3**: REST API interface layer (55+ tasks) - includes schema introspection endpoints
+- **Phase 4**: MCP interface layer (45+ tasks) - includes schema introspection tools and resource URIs
 
-**Total**: ~220 granular tasks, each taking ~10 minutes
+**Total**: ~240 granular tasks, each taking ~10 minutes
 **Pattern**: Test (FAIL) → Implement → Test (PASS) → Commit
+**Enhancements**: 
+- ✅ All CRITICAL spec violations fixed (4 issues)
+- ✅ All SHOULD ADD recommendations implemented (3 improvements)
+- ✅ All NICE TO HAVE features added (3 enhancements)
 **Result**: Clean git history with atomic, reversible changes
 
 - [ ] **P1.4.6** Implement `delete(document: dict, pointer: str) -> dict`
