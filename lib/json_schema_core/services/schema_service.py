@@ -56,7 +56,11 @@ class SchemaService:
         
         # Check for circular reference
         if base_id in visited:
-            raise ValidationFailedError(f"Circular reference detected: {base_id}")
+            raise ValidationFailedError([{
+                "message": f"Circular reference detected: {base_id}",
+                "path": "",
+                "validator": "ref_resolution"
+            }])
         
         visited_copy = visited.copy()
         visited_copy.add(base_id)
@@ -98,7 +102,11 @@ class SchemaService:
                     ref_id = ref
                     
                     if ref_id in visited:
-                        raise ValidationFailedError(f"Circular reference detected: {ref_id}")
+                        raise ValidationFailedError([{
+                            "message": f"Circular reference detected: {ref_id}",
+                            "path": "",
+                            "validator": "ref_resolution"
+                        }])
                     
                     visited_copy = visited.copy()
                     visited_copy.add(ref_id)
