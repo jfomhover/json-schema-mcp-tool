@@ -288,3 +288,86 @@ def test_create_document_custom_id_must_be_valid(document_service, sample_schema
     # Try with invalid ID (not ULID format)
     with pytest.raises(ValueError, match="Invalid document ID"):
         document_service.create_document(schema_id, document, doc_id="invalid-id-123")
+
+
+# P1.2: Document Creation - Error Handling
+
+def test_create_document_missing_required_field(document_service, sample_schema, invalid_doc_missing_title):
+    """Test that missing required field causes validation error"""
+    schema_id, _ = sample_schema
+    
+    # invalid_doc_missing_title is missing the required "title" field
+    with pytest.raises(ValidationFailedError) as exc_info:
+        document_service.create_document(schema_id, invalid_doc_missing_title)
+    
+    # Verify error contains details about missing field
+    error = exc_info.value
+    assert len(error.errors) > 0
+    # Check if any error mentions "title" or "required"
+    error_str = str(error.errors).lower()
+    assert "title" in error_str or "required" in error_str
+
+
+def test_create_document_wrong_type(document_service, sample_schema, invalid_doc_wrong_type):
+    """Test that wrong field type causes validation error"""
+    schema_id, _ = sample_schema
+    
+    # invalid_doc_wrong_type has "authors" as string instead of array
+    with pytest.raises(ValidationFailedError) as exc_info:
+        document_service.create_document(schema_id, invalid_doc_wrong_type)
+    
+    # Verify error contains details about type mismatch
+    error = exc_info.value
+    assert len(error.errors) > 0
+    # Check if any error mentions "authors" or type-related keywords
+    error_str = str(error.errors).lower()
+    assert "authors" in error_str or "array" in error_str or "type" in error_str
+
+
+def test_create_document_validates_after_defaults(document_service, temp_storage):
+    """Test that validation occurs after applying defaults"""
+    # Create a schema with a default that should pass validation
+    schema_id = str(DocumentId.generate())
+    schema = {
+        "type": "object",
+        "properties": {
+            "count": {"type": "integer", "minimum": 10, "default": 15},
+            "name": {"type": "string"}
+        },
+        "required": ["count", "name"]
+    }
+    temp_storage.write_document(schema_id, schema)
+    
+    # Document without "count" - should get default value of 15
+    document = {
+        "name": "Test"
+    }
+    
+    doc_id, _ = document_service.create_document(schema_id, document)
+    
+    # Verify default was applied and document was stored
+    stored_doc = temp_storage.read_document(doc_id)
+    assert stored_doc["count"] == 15
+    assert stored_doc["name"] == "Test"
+
+
+def test_create_document_empty_required_array(document_service, sample_schema):
+    """Test that empty array for required field with minItems fails validation"""
+    schema_id, _ = sample_schema
+    
+    # text.json schema requires authors array to have minItems: 1
+    document = {
+        "title": "Test",
+        "authors": [],  # Empty array violates minItems: 1
+        "sections": []
+    }
+    
+    with pytest.raises(ValidationFailedError) as exc_info:
+        document_service.create_document(schema_id, document)
+    
+    # Verify error contains validation details
+    error = exc_info.value
+    assert len(error.errors) > 0
+    # Check if any error mentions the validation issue
+    error_str = str(error.errors).lower()
+    assert "authors" in error_str or "minitems" in error_str or "too short" in error_str
