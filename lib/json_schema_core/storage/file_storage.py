@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from json_schema_core.storage.storage_interface import StorageInterface
+from json_schema_core.domain.errors import DocumentNotFoundError
 
 
 class FileSystemStorage(StorageInterface):
@@ -56,8 +57,17 @@ class FileSystemStorage(StorageInterface):
             
         Returns:
             Document content as dictionary
+            
+        Raises:
+            DocumentNotFoundError: If document doesn't exist
         """
-        raise NotImplementedError("read_document not yet implemented")
+        doc_file = self.base_path / f"{doc_id}.json"
+        
+        if not doc_file.exists():
+            raise DocumentNotFoundError(doc_id)
+        
+        with open(doc_file, "r") as f:
+            return json.load(f)
     
     def delete_document(self, doc_id: str) -> None:
         """Delete a document.

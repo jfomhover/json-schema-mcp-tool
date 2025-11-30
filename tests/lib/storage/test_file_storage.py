@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import pytest
 from json_schema_core.storage.file_storage import FileSystemStorage
+from json_schema_core.domain.errors import DocumentNotFoundError
 
 
 def test_write_document_creates_file(tmp_path):
@@ -77,3 +78,28 @@ def test_write_document_durable(tmp_path):
     with open(doc_file, "r") as f:
         saved_content = json.load(f)
     assert saved_content == content
+
+
+def test_read_document_returns_content(tmp_path):
+    """Test that read_document returns the document content."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "test-doc-5"
+    content = {"title": "Test", "data": [1, 2, 3]}
+    
+    # Write first
+    storage.write_document(doc_id, content)
+    
+    # Now read back
+    result = storage.read_document(doc_id)
+    assert result == content
+
+
+def test_read_document_raises_not_found(tmp_path):
+    """Test that read_document raises DocumentNotFoundError for missing documents."""
+    storage = FileSystemStorage(tmp_path)
+    doc_id = "non-existent-doc"
+    
+    with pytest.raises(DocumentNotFoundError) as exc_info:
+        storage.read_document(doc_id)
+    
+    assert exc_info.value.doc_id == doc_id
