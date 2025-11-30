@@ -6,7 +6,7 @@ from json_schema_core.services.document_service import DocumentService
 from json_schema_core.services.schema_service import SchemaService
 from json_schema_core.services.validation_service import ValidationService
 from json_schema_core.storage.file_storage import FileSystemStorage
-from json_schema_core.domain.errors import ValidationFailedError
+from json_schema_core.domain.errors import ValidationFailedError, VersionConflictError
 from json_schema_core.domain.document_id import DocumentId
 from json_schema_core.domain.metadata import DocumentMetadata
 import tempfile
@@ -908,4 +908,113 @@ def test_list_documents_pagination(document_service, sample_schema, valid_minima
     # Verify all 5 documents are covered
     all_ids = page1_ids | page2_ids | page3_ids
     assert len(all_ids) == 5
+
+
+# P1.10: Integration Tests
+
+
+def test_full_document_lifecycle(document_service, sample_schema, valid_full_doc):
+    """Test complete document lifecycle: create, read, update, create node, delete node, list"""
+    schema_id, _ = sample_schema
+    
+    # 1. Create document
+    doc_id, metadata = document_service.create_document(schema_id, valid_full_doc)
+    assert metadata.version == 1
+    
+    # 2. Read root and verify content
+    root_value, root_version = document_service.read_node(doc_id, "")
+    assert root_version == 1
+    assert root_value["title"] == "Complete Document"
+    assert len(root_value["sections"]) == 3  # valid_full_doc has 3 sections
+    
+    # 3. Update a field (change title)
+    new_title = "Updated Document Title"
+    updated_title, version2 = document_service.update_node(
+        doc_id, "/title", new_title, expected_version=1
+    )
+    assert updated_title == new_title
+    assert version2 == 2
+    
+    # 4. Read updated field
+    title_value, title_version = document_service.read_node(doc_id, "/title")
+    assert title_value == new_title
+    assert title_version == 2
+    
+    # 5. Create a new section (append to array)
+    new_section = {
+        "title": "New Section",
+        "paragraphs": ["This is a new section added to the document."]
+    }
+    created_section, version3 = document_service.create_node(
+        doc_id, "/sections", new_section, expected_version=2
+    )
+    assert created_section == new_section
+    assert version3 == 3
+    
+    # Verify section was added
+    sections_value, _ = document_service.read_node(doc_id, "/sections")
+    assert len(sections_value) == 4  # Now 4 sections (3 original + 1 new)
+    assert sections_value[3]["title"] == "New Section"
+    
+    # 6. Delete a section (delete first section)
+    deleted_section, version4 = document_service.delete_node(
+        doc_id, "/sections/0", expected_version=3
+    )
+    assert deleted_section["title"] == "Introduction"
+    assert version4 == 4
+    
+    # Verify section was deleted
+    sections_after_delete, _ = document_service.read_node(doc_id, "/sections")
+    assert len(sections_after_delete) == 3  # Now 3 sections (deleted 1)
+    assert sections_after_delete[0]["title"] == "Main Content"  # First section is now "Main Content"
+    
+    # 7. List documents
+    docs_list = document_service.list_documents()
+    assert len(docs_list) == 1
+    assert docs_list[0]["doc_id"] == doc_id
+    assert docs_list[0]["version"] == 4
+    
+    # 8. Verify final state
+    final_doc, final_version = document_service.read_node(doc_id, "")
+    assert final_version == 4
+    assert final_doc["title"] == new_title
+    assert len(final_doc["sections"]) == 3
+    assert final_doc["sections"][0]["title"] == "Main Content"
+    assert final_doc["sections"][2]["title"] == "New Section"
+
+
+def test_concurrent_updates_version_conflict(document_service, sample_schema, valid_minimal_doc):
+    """Test that concurrent updates fail with VersionConflictError due to optimistic locking"""
+    schema_id, _ = sample_schema
+    
+    # Create document (version 1)
+    doc_id, metadata = document_service.create_document(schema_id, valid_minimal_doc)
+    assert metadata.version == 1
+    
+    # Simulate two concurrent clients reading the document at version 1
+    doc1, version1 = document_service.read_node(doc_id, "")
+    doc2, version2 = document_service.read_node(doc_id, "")
+    assert version1 == 1
+    assert version2 == 1
+    
+    # First client updates successfully (version 1 -> 2)
+    _, new_version1 = document_service.update_node(
+        doc_id, "/title", "First Update", expected_version=1
+    )
+    assert new_version1 == 2
+    
+    # Second client tries to update with stale version (should fail)
+    with pytest.raises(VersionConflictError) as exc_info:
+        document_service.update_node(
+            doc_id, "/title", "Second Update", expected_version=1
+        )
+    
+    # Verify error message contains useful information
+    error = exc_info.value
+    assert "version conflict" in str(error).lower()
+    
+    # Verify the first update succeeded and second didn't
+    final_doc, final_version = document_service.read_node(doc_id, "")
+    assert final_version == 2
+    assert final_doc["title"] == "First Update"
 
