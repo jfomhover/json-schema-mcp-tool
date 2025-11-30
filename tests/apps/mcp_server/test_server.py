@@ -1,6 +1,5 @@
 """Tests for MCP server initialization."""
 
-import pytest
 
 
 def test_server_creation(document_service):

@@ -1,9 +1,8 @@
 """MCP Server implementation for JSON Schema document management."""
 
-from mcp.server import Server
-
 from json_schema_core.services.document_service import DocumentService
 from json_schema_core.services.schema_service import SchemaService
+from mcp.server import Server
 
 
 class MCPServer:

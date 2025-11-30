@@ -1,12 +1,10 @@
 """Test fixtures for MCP server tests."""
 
-import pytest
-from pathlib import Path
 
+import pytest
 from json_schema_core.config import ServerConfig
 from json_schema_core.services.document_service import DocumentService
 from json_schema_core.services.schema_service import SchemaService
-from json_schema_core.services.validation_service import ValidationService
 from json_schema_core.storage.file_storage import FileSystemStorage
 
 
@@ -54,14 +52,14 @@ def sample_schema(config):
 def document_service(config, sample_schema):
     """Return initialized DocumentService for tests."""
     storage = FileSystemStorage(config.storage_dir)
-    
+
     # SchemaService needs schemas to be in storage
     # Copy schema to storage location
     import shutil
     schema_file = config.schema_path / f"{sample_schema}.json"
     storage_schema_file = config.storage_dir / f"{sample_schema}.json"
     shutil.copy(schema_file, storage_schema_file)
-    
+
     schema_service = SchemaService(storage)
 
     service = DocumentService(storage, schema_service)

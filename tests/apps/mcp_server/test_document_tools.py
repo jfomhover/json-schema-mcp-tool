@@ -1,6 +1,5 @@
 """Tests for MCP document tools."""
 
-import pytest
 
 
 def test_document_create_success(mcp_server, sample_schema):
@@ -32,8 +31,9 @@ def test_document_create_success(mcp_server, sample_schema):
 
 def test_document_create_required_field_error(mcp_server, config):
     """Test document_create returns error if required field has no default."""
-    from apps.mcp_server.tools.document_tools import document_create
     import json
+
+    from apps.mcp_server.tools.document_tools import document_create
     # Write a schema with a required field and no default
     schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -132,7 +132,11 @@ def test_document_read_node_invalid_path(mcp_server, sample_schema):
 
 def test_document_update_node_success(mcp_server, sample_schema):
     """Test document_update_node tool updates a node successfully."""
-    from apps.mcp_server.tools.document_tools import document_create, document_update_node, document_read_node
+    from apps.mcp_server.tools.document_tools import (
+        document_create,
+        document_read_node,
+        document_update_node,
+    )
 
     # Create a document first
     create_result = document_create(mcp_server, sample_schema)
@@ -164,12 +168,20 @@ def test_document_update_node_version_conflict(mcp_server, sample_schema):
 
     # Update once (version 1 -> 2)
     document_update_node(
-        doc_id=doc_id, node_path="/title", value="First Update", expected_version=1, server=mcp_server
+        doc_id=doc_id,
+        node_path="/title",
+        value="First Update",
+        expected_version=1,
+        server=mcp_server,
     )
 
     # Try to update with old version (should fail)
     result = document_update_node(
-        doc_id=doc_id, node_path="/title", value="Second Update", expected_version=1, server=mcp_server
+        doc_id=doc_id,
+        node_path="/title",
+        value="Second Update",
+        expected_version=1,
+        server=mcp_server,
     )
 
     # Should return version conflict error
@@ -199,7 +211,11 @@ def test_document_update_node_validation_error(mcp_server, sample_schema):
 
 def test_document_create_node_success(mcp_server, sample_schema):
     """Test document_create_node tool creates a new node in an array."""
-    from apps.mcp_server.tools.document_tools import document_create, document_create_node, document_read_node
+    from apps.mcp_server.tools.document_tools import (
+        document_create,
+        document_create_node,
+        document_read_node,
+    )
 
     # Create a document
     create_result = document_create(mcp_server, sample_schema)
@@ -254,11 +270,17 @@ def test_document_delete_node_success(mcp_server, sample_schema):
     doc_id = create_result["doc_id"]
 
     # Add two tags
-    document_create_node(doc_id=doc_id, node_path="/tags", value="python", expected_version=1, server=mcp_server)
-    document_create_node(doc_id=doc_id, node_path="/tags", value="rust", expected_version=2, server=mcp_server)
+    document_create_node(
+        doc_id=doc_id, node_path="/tags", value="python", expected_version=1, server=mcp_server
+    )
+    document_create_node(
+        doc_id=doc_id, node_path="/tags", value="rust", expected_version=2, server=mcp_server
+    )
 
     # Delete the first tag
-    result = document_delete_node(doc_id=doc_id, node_path="/tags/0", expected_version=3, server=mcp_server)
+    result = document_delete_node(
+        doc_id=doc_id, node_path="/tags/0", expected_version=3, server=mcp_server
+    )
 
     # Should return deleted content and new version
     assert "content" in result
@@ -280,7 +302,9 @@ def test_document_delete_node_validation_error(mcp_server, sample_schema):
     doc_id = create_result["doc_id"]
 
     # Try to delete a required field (should fail validation)
-    result = document_delete_node(doc_id=doc_id, node_path="/title", expected_version=1, server=mcp_server)
+    result = document_delete_node(
+        doc_id=doc_id, node_path="/title", expected_version=1, server=mcp_server
+    )
 
     # Should return validation error
     assert "error" in result
@@ -315,7 +339,7 @@ def test_document_list_returns_metadata(mcp_server, sample_schema):
     # Should return 3 documents with metadata
     assert "documents" in result
     assert len(result["documents"]) == 3
-    
+
     # Check that each has the required metadata fields
     for doc in result["documents"]:
         assert "doc_id" in doc

@@ -1,13 +1,15 @@
 """MCP tools for document operations."""
 
 from typing import Any
-from apps.mcp_server.server import MCPServer
+
 from json_schema_core.domain.errors import (
-    ValidationFailedError,
     DocumentNotFoundError,
     PathNotFoundError,
+    ValidationFailedError,
     VersionConflictError,
 )
+
+from apps.mcp_server.server import MCPServer
 
 
 def document_create(server: MCPServer, schema_id: str) -> dict:
@@ -22,7 +24,8 @@ def document_create(server: MCPServer, schema_id: str) -> dict:
         dict with doc_id and version
 
     Raises:
-        ValidationFailedError: If document cannot be created (e.g., required fields without defaults)
+        ValidationFailedError: If document cannot be created
+            (e.g., required fields without defaults)
     """
     try:
         # Create empty document - defaults will be applied by DocumentService
@@ -183,7 +186,7 @@ def document_create_node(
         # Read back the parent to determine the index where the value was added
         # For arrays, the new item is at the end
         parent_content, _ = server.document_service.read_node(doc_id=doc_id, node_path=node_path)
-        
+
         if isinstance(parent_content, list):
             # Find the index (last item)
             index = len(parent_content) - 1

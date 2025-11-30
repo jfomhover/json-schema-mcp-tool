@@ -1,9 +1,9 @@
 """MCP tools for schema introspection operations."""
 
-from typing import Any
-from apps.mcp_server.server import MCPServer
 from json_schema_core.domain.errors import PathNotFoundError
 from json_schema_core.utils.json_pointer import resolve_pointer
+
+from apps.mcp_server.server import MCPServer
 
 
 def schema_get_node(node_path: str, dereferenced: bool = True, server: MCPServer = None) -> dict:
@@ -26,7 +26,7 @@ def schema_get_node(node_path: str, dereferenced: bool = True, server: MCPServer
         # Note: We're using 'document' as the default schema ID for now
         # In a full implementation, this would be configurable
         schema = server.schema_service.load_schema("document")
-        
+
         # Navigate to the requested path
         if node_path == "/":
             result_schema = schema

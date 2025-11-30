@@ -1,6 +1,5 @@
 """Tests for MCP schema tools."""
 
-import pytest
 
 
 def test_schema_get_node_root(mcp_server):
@@ -13,7 +12,7 @@ def test_schema_get_node_root(mcp_server):
     # Should return schema dict
     assert "schema" in result
     schema = result["schema"]
-    
+
     # Should be a valid schema object
     assert "type" in schema
     assert schema["type"] == "object"
@@ -30,7 +29,7 @@ def test_schema_get_node_nested(mcp_server):
     # Should return schema for the title field
     assert "schema" in result
     schema = result["schema"]
-    
+
     # Title should be a string with default
     assert "type" in schema
     assert schema["type"] == "string"
@@ -58,7 +57,7 @@ def test_schema_get_root_dereferenced(mcp_server):
     # Should return schema
     assert "schema" in result
     schema = result["schema"]
-    
+
     # Should be fully dereferenced (no $ref)
     assert "type" in schema
     # Check that it doesn't have $ref at the root level
@@ -75,6 +74,6 @@ def test_schema_get_root_raw(mcp_server):
     # Should return schema
     assert "schema" in result
     schema = result["schema"]
-    
+
     # Should be a valid schema
     assert "type" in schema
